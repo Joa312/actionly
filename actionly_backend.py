@@ -1,5 +1,6 @@
 # STAYFINDR BACKEND - European Hotel Search Engine
 # Flask backend with RapidAPI Booking.com integration
+# FIXED: Direct hotel booking URLs
 
 import os
 from flask import Flask, request, jsonify, render_template_string
@@ -213,8 +214,38 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     
     return None
 
-def process_hotel_data(hotels_data, city_info):
-    """Process and format hotel data"""
+def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms):
+    """Create the best possible booking URL for the hotel"""
+    
+    # Priority 1: Use direct hotel URL from API if available
+    direct_urls = [
+        hotel.get('url'),
+        hotel.get('link'), 
+        hotel.get('booking_url'),
+        hotel.get('hotelUrl'),
+        hotel.get('deepLink')
+    ]
+    
+    for url in direct_urls:
+        if url and 'booking.com' in str(url):
+            # Add search parameters to direct URL
+            if '?' in url:
+                return f"{url}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+            else:
+                return f"{url}?checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    
+    # Priority 2: Use hotel ID if available
+    hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
+    if hotel_id:
+        return f"https://www.booking.com/hotel/details.html?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    
+    # Priority 3: Search by hotel name in the city
+    hotel_name = hotel.get('name', '').replace(' ', '+')
+    city_name = city_info['name'].replace(' ', '+')
+    return f"https://www.booking.com/searchresults.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+
+def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms):
+    """Process and format hotel data with proper booking URLs"""
     processed_hotels = []
     
     for i, hotel in enumerate(hotels_data):
@@ -244,9 +275,18 @@ def process_hotel_data(hotels_data, city_info):
                 total_price = price_info['value']
                 try:
                     # Estimate per night (assuming booking is for multiple nights)
-                    price = int(total_price / 7)  # Assume 7-night booking for now
+                    from datetime import datetime
+                    checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
+                    checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
+                    nights = (checkout_date - checkin_date).days
+                    if nights > 0:
+                        price = int(total_price / nights)
+                    else:
+                        price = total_price
                 except:
-                    price = total_price
+                    price = int(total_price / 7)  # Fallback: assume 7 nights
+        elif 'price' in hotel:
+            price = hotel['price']
         
         # Extract rating
         rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
@@ -258,12 +298,11 @@ def process_hotel_data(hotels_data, city_info):
         # Extract address
         address = hotel.get('address', city_info['name'])
         
-        # Create booking URL
-        hotel_id = hotel.get('id', '')
-        booking_url = f"https://www.booking.com/hotel/searchresults.html?ss={city_info['name']}"
+        # Create optimized booking URL
+        booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms)
         
         processed_hotel = {
-            'id': hotel_id or f"hotel_{i}",
+            'id': hotel.get('id') or hotel.get('hotel_id') or f"hotel_{i}",
             'name': hotel_name,
             'address': address,
             'coordinates': coordinates,
@@ -290,16 +329,23 @@ def home():
             .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
             .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
             .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
+            .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
         </style>
     </head>
     <body>
         <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend for European hotel search</p>
+        <p>Flask backend for European hotel search with optimized booking URLs</p>
+        
+        <div class="feature">
+            <strong>✅ NEW: Direct Hotel Booking URLs</strong><br>
+            CTA buttons now link directly to specific hotels on Booking.com
+        </div>
         
         <h2>Available endpoints:</h2>
         <div class="endpoint">
             <strong>/api/hotels</strong> - Get hotels for a city<br>
-            Parameters: city, checkin, checkout, adults, rooms
+            Parameters: city, checkin, checkout, adults, rooms<br>
+            <em>Now with optimized booking URLs</em>
         </div>
         <div class="endpoint">
             <strong>/api/cities</strong> - List all 29 cities
@@ -328,7 +374,7 @@ def get_cities():
 
 @app.route('/api/hotels')
 def get_hotels():
-    """Get hotels for a specific city"""
+    """Get hotels for a specific city with optimized booking URLs"""
     city = request.args.get('city', 'stockholm')
     checkin = request.args.get('checkin', '2025-07-14')
     checkout = request.args.get('checkout', '2025-07-21')
@@ -352,8 +398,15 @@ def get_hotels():
     if not hotels_data or 'data' not in hotels_data:
         return jsonify({'error': 'No hotels found'}), 404
     
-    # Process hotel data
-    processed_hotels = process_hotel_data(hotels_data['data'], city_info)
+    # Process hotel data with optimized booking URLs
+    processed_hotels = process_hotel_data(
+        hotels_data['data'], 
+        city_info, 
+        checkin, 
+        checkout, 
+        adults, 
+        rooms
+    )
     
     return jsonify({
         'city': city_info['name'],
@@ -364,7 +417,8 @@ def get_hotels():
             'checkout': checkout, 
             'adults': adults,
             'rooms': rooms
-        }
+        },
+        'booking_optimization': 'enabled'
     })
 
 @app.route('/test')
@@ -377,6 +431,7 @@ if __name__ == '__main__':
     print("🏨 Supporting 29 European cities")
     print("🔗 Frontend will connect to: http://localhost:5000")
     print("📋 Test API: http://localhost:5000/test")
+    print("✅ NEW: Optimized booking URLs enabled")
     
     # Use PORT environment variable for deployment (Render, Heroku, etc.)
     port = int(os.environ.get('PORT', 5000))
