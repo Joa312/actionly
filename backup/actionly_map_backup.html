@@ -1,0 +1,113 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACTIONLY - European Hotel Search with Interactive Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin=""/>
+    <style>
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0; padding: 20px; min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 3rem; font-weight: 700; }
+        .search-container { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 20px; padding: 30px; margin-bottom: 30px; 
+        }
+        .main-content { display: grid; grid-template-columns: 1fr 400px; gap: 30px; height: 600px; }
+        #map { border-radius: 15px; }
+ = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACTIONLY - European Hotel Search with Interactive Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin=""/>
+    <style>
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0; padding: 20px; min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 3rem; font-weight: 700; }
+        .search-container { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 20px; padding: 30px; margin-bottom: 30px; 
+        }
+        .main-content { display: grid; grid-template-columns: 1fr 400px; gap: 30px; height: 600px; }
+        #map { border-radius: 15px; }
+        .hotels-panel { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 15px; padding: 25px; overflow-y: auto; 
+        }
+        select, input, button { 
+            padding: 12px; border-radius: 8px; border: 1px solid #ddd; 
+            font-size: 16px; margin: 5px;
+        }
+        button { 
+            background: linear-gradient(135deg, #667eea, #764ba2); 
+            color: white; cursor: pointer; border: none;
+        }
+        .hotel-card { 
+            background: white; border-radius: 10px; padding: 15px; 
+            margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏨 ACTIONLY</h1>
+            <p>European Hotel Search - 29 Cities</p>
+        </div>
+        <div class="search-container">
+            <select id="city">
+                <option value="paris">Paris, France</option>
+                <option value="london">London, UK</option>
+                <option value="stockholm">Stockholm, Sweden</option>
+                <option value="rome">Rome, Italy</option>
+                <option value="barcelona">Barcelona, Spain</option>
+            </select>
+            <input type="date" id="checkin">
+            <input type="date" id="checkout">
+            <button onclick="searchHotels()">🔍 Search Hotels</button>
+        </div>
+        <div class="main-content">
+            <div id="map"></div>
+            <div class="hotels-panel">
+                <h3>Hotels</h3>
+                <div id="hotelsList">Click Search to find hotels</div>
+            </div>
+        </div>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map = L.map('map').setView([48.8566, 2.3522], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        function searchHotels() {
+            const city = document.getElementById('city').value;
+            document.getElementById('hotelsList').innerHTML = 
+                '<div class="hotel-card"><h4>Grand Hotel ' + city + '</h4><p>€150/night</p></div>' +
+                '<div class="hotel-card"><h4>Boutique Hotel ' + city + '</h4><p>€120/night</p></div>';
+            alert('Hotels found for ' + city + '!');
+        }
+        
+        // Set today's date
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('checkin').value = today;
+        document.getElementById('checkout').value = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    </script>
+</body>
+</html>

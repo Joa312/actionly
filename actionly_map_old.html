@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACTIONLY - European Hotel Search with Interactive Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin=""/>
+    <style>
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0; padding: 20px; min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 3rem; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+        .header p { font-size: 1.2rem; opacity: 0.9; }
+        .search-container { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 20px; padding: 30px; margin-bottom: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .search-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .main-content { display: grid; grid-template-columns: 1fr 400px; gap: 30px; height: 600px; }
+        #map { border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+        .hotels-panel { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 15px; padding: 25px; overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .hotels-panel h3 {
+            color: #333; margin-bottom: 20px; font-size: 1.5rem;
+            border-bottom: 3px solid #667eea; padding-bottom: 10px;
+        }
+        select, input, button { 
+            padding: 12px 15px; border-radius: 10px; border: 2px solid #e1e8ed; 
+            font-size: 16px; margin: 5px; background: white;
+            transition: all 0.3s ease;
+        }
+        select:focus, input:focus {
+            outline: none; border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        button { 
+            background: linear-gradient(135deg, #667eea, #764ba2); 
+            color: white; cursor: pointer; border: none;
+            font-weight: 600; transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        .hotel-card { 
+            background: white; border-radius: 12px; padding: 20px; 
+            margin: 15px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s ease; cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .hotel-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+        .hotel-name { font-size: 1.2rem; font-weight: 600; color: #333; margin-bottom: 8px; }
+        .hotel-details { color: #666; margin-bottom: 12px; }
+        .hotel-price { font-size: 1.3rem; font-weight: 700; color: #27ae60; }
+        .city-info {
+            background: linear-gradient(135deg, #f8f9ff 0%, #e8f2ff 100%);
+            border: 2px solid #667eea; border-radius: 10px; padding: 15px;
+            margin-bottom: 20px; text-align: center;
+        }
+        .city-info h4 { color: #667eea; margin: 0 0 5px 0; }
+        .city-info p { color: #666; margin: 0; font-size: 0.9rem; }
+        
+        @media (max-width: 1024px) {
+            .main-content { grid-template-columns: 1fr; grid-template-rows: 400px 1fr; height: auto; }
+        }
+        @media (max-width: 768px) {
+            .search-form { grid-template-columns: 1fr; }
+            .main-content { grid-template-rows: 300px 1fr; }
+            .header h1 { font-size: 2.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏨 ACTIONLY</h1>
+            <p>European Hotel Search - 29 Cities Real-time Comparison</p>
+        </div>
+        
+        <div class="search-container">
+            <div class="search-form">
+                <select id="city">
+                    <option value="paris">Paris, France</option>
+                    <option value="london">London, UK</option>
+                    <option value="amsterdam">Amsterdam, Netherlands</option>
+                    <option value="barcelona">Barcelona, Spain</option>
+                    <option value="rome">Rome, Italy</option>
+                    <option value="berlin">Berlin, Germany</option>
+                    <option value="stockholm">Stockholm, Sweden</option>
+                    <option value="copenhagen">Copenhagen, Denmark</option>
+                    <option value="vienna">Vienna, Austria</option>
+                    <option value="prague">Prague, Czech Republic</option>
+                    <option value="madrid">Madrid, Spain</option>
+                    <option value="milano">Milano, Italy</option>
+                    <option value="zurich">Zürich, Switzerland</option>
+                    <option value="oslo">Oslo, Norway</option>
+                    <option value="helsinki">Helsinki, Finland</option>
+                    <option value="warsaw">Warsaw, Poland</option>
+                    <option value="budapest">Budapest, Hungary</option>
+                    <option value="dublin">Dublin, Ireland</option>
+                    <option value="lisbon">Lisbon, Portugal</option>
+                    <option value="brussels">Brussels, Belgium</option>
+                    <option value="athens">Athens, Greece</option>
+                    <option value="munich">Munich, Germany</option>
+                    <option value="lyon">Lyon, France</option>
+                    <option value="florence">Florence, Italy</option>
+                    <option value="edinburgh">Edinburgh, Scotland</option>
+                    <option value="nice">Nice, France</option>
+                    <option value="palma">Palma, Spain</option>
+                    <option value="santorini">Santorini, Greece</option>
+                    <option value="ibiza">Ibiza, Spain</option>
+                </select>
+                <input type="date" id="checkin">
+                <input type="date" id="checkout">
+                <button onclick="searchHotels()">🔍 Search Hotels</button>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div id="map"></div>
+            <div class="hotels-panel">
+                <div id="cityInfo" class="city-info" style="display: none;">
+                    <h4 id="cityName"></h4>
+                    <p id="cityDetails"></p>
+                </div>
+                <h3>🏨 Best Hotels</h3>
+                <div id="hotelsList">
+                    <p style="text-align: center; color: #666; padding: 20px;">
+                        Select a city and click "Search Hotels" to find the best deals
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Wait for Leaflet to load completely
+        function waitForLeaflet() {
+            return new Promise((resolve) => {
+                if (typeof L !== 'undefined') {
+                    console.log('✅ Leaflet loaded successfully');
+                    resolve();
+                } else {
+                    console.log('⏳ Waiting for Leaflet...');
+                    setTimeout(() => waitForLeaflet().then(resolve), 100);
+                }
+            });
+        }
+
+        let map;
+        let currentMarkers = [];
+        
+        // All 29 European Cities with Real Coordinates and Unique Hotels
+        const cities = {
+            paris: { center: [48.8566, 2.3522], country: "France", hotels: ['Grand Hotel Paris', 'Hotel des Invalides', 'Boutique Marais', 'Champs-Elysées Palace', 'Latin Quarter Inn'] },
+            london: { center: [51.5074, -0.1278], country: "United Kingdom", hotels: ['The Savoy London', 'Covent Garden Hotel', 'Tower Bridge Inn', 'Hyde Park Palace', 'Thames Boutique'] },
+            amsterdam: { center: [52.3676, 4.9041], country: "Netherlands", hotels: ['Grand Hotel Amrâth', 'Canal House Hotel', 'Jordaan Boutique', 'Museum Quarter Inn', 'Red Light District Hotel'] },
+            barcelona: { center: [41.3851, 2.1734], country: "Spain", hotels: ['Hotel Barcelona Center', 'Gothic Quarter Boutique', 'Sagrada Familia Inn', 'Las Ramblas Palace', 'Park Güell Hotel'] },
+            rome: { center: [41.9028, 12.4964], country: "Italy", hotels: ['Grand Hotel Roma', 'Vatican Palace Hotel', 'Colosseum Inn', 'Trastevere Boutique', 'Spanish Steps Hotel'] },
+            berlin: { center: [52.5200, 13.4050], country: "Germany", hotels: ['Hotel Adlon Berlin', 'Brandenburg Gate Inn', 'Mitte Boutique Hotel', 'Kreuzberg Palace', 'Museum Island Hotel'] },
+            stockholm: { center: [59.3293, 18.0686], country: "Sweden", hotels: ['Grand Hôtel Stockholm', 'Gamla Stan Boutique', 'Södermalm Inn', 'Royal Palace Hotel', 'Archipelago Resort'] },
+            copenhagen: { center: [55.6761, 12.5683], country: "Denmark", hotels: ['Hotel d\'Angleterre', 'Nyhavn Palace', 'Tivoli Gardens Inn', 'Little Mermaid Hotel', 'Christiania Boutique'] },
+            vienna: { center: [48.2082, 16.3738], country: "Austria", hotels: ['Hotel Sacher Wien', 'Schönbrunn Palace Hotel', 'Vienna Opera Inn', 'Ringstrasse Boutique', 'Imperial Palace Hotel'] },
+            prague: { center: [50.0755, 14.4378], country: "Czech Republic", hotels: ['Hotel Golden Well', 'Charles Bridge Inn', 'Old Town Square Hotel', 'Prague Castle Boutique', 'Wenceslas Palace'] },
+            madrid: { center: [40.4168, -3.7038], country: "Spain", hotels: ['Hotel Ritz Madrid', 'Gran Meliá Palacio', 'Prado Museum Hotel', 'Retiro Park Inn', 'Salamanca Boutique'] },
+            milano: { center: [45.4642, 9.1900], country: "Italy", hotels: ['Park Hyatt Milano', 'Bulgari Hotel Milano', 'La Scala Palace', 'Navigli Boutique', 'Duomo Grand Hotel'] },
+            zurich: { center: [47.3769, 8.5417], country: "Switzerland", hotels: ['Baur au Lac Zurich', 'Widder Hotel', 'Lake Zurich Palace', 'Old Town Boutique', 'Swiss Alpine Inn'] },
+            oslo: { center: [59.9139, 10.7522], country: "Norway", hotels: ['Grand Hotel Oslo', 'The Thief Oslo', 'Fjord View Palace', 'Viking Heritage Inn', 'Nordic Boutique'] },
+            helsinki: { center: [60.1699, 24.9384], country: "Finland", hotels: ['Hotel Kämp Helsinki', 'Scandic Helsinki', 'Baltic Sea Palace', 'Design District Inn', 'Sauna Boutique'] },
+            warsaw: { center: [52.2297, 21.0122], country: "Poland", hotels: ['Hotel Bristol Warsaw', 'Raffles Europejski', 'Old Town Palace', 'Vistula River Inn', 'Polish Heritage Hotel'] },
+            budapest: { center: [47.4979, 19.0402], country: "Hungary", hotels: ['Four Seasons Budapest', 'New York Palace', 'Danube River Hotel', 'Thermal Spa Inn', 'Buda Castle Boutique'] },
+            dublin: { center: [53.3498, -6.2603], country: "Ireland", hotels: ['The Shelbourne Dublin', 'Conrad Dublin', 'Temple Bar Inn', 'Phoenix Park Hotel', 'Irish Heritage Boutique'] },
+            lisbon: { center: [38.7223, -9.1393], country: "Portugal", hotels: ['Tivoli Oriente Lisboa', 'Memmo Alfama Hotel', 'Tagus River Palace', 'Fado Music Inn', 'Portuguese Tiles Boutique'] },
+            brussels: { center: [50.8503, 4.3517], country: "Belgium", hotels: ['Hotel des Galeries', 'Rocco Forte Brussels', 'Grand Place Palace', 'EU Quarter Inn', 'Belgian Chocolate Boutique'] },
+            athens: { center: [37.9838, 23.7275], country: "Greece", hotels: ['Hotel Grande Bretagne', 'Electra Palace Athens', 'Acropolis View Hotel', 'Plaka Heritage Inn', 'Aegean Sea Boutique'] },
+            munich: { center: [48.1351, 11.5820], country: "Germany", hotels: ['Hotel Vier Jahreszeiten', 'Mandarin Oriental Munich', 'Oktoberfest Palace', 'Bavarian Heritage Inn', 'Alpine View Boutique'] },
+            lyon: { center: [45.7640, 4.8357], country: "France", hotels: ['InterContinental Lyon', 'Villa Florentine', 'Rhône River Palace', 'Silk District Inn', 'French Cuisine Boutique'] },
+            florence: { center: [43.7696, 11.2558], country: "Italy", hotels: ['Hotel Davanzati', 'Portrait Firenze', 'Arno River Palace', 'Renaissance Art Inn', 'Tuscan Heritage Boutique'] },
+            edinburgh: { center: [55.9533, -3.1883], country: "Scotland", hotels: ['The Balmoral Edinburgh', 'Waldorf Astoria Edinburgh', 'Castle View Palace', 'Royal Mile Inn', 'Scottish Highlands Boutique'] },
+            nice: { center: [43.7102, 7.2620], country: "France", hotels: ['Hotel Negresco Nice', 'Villa Victoria Nice', 'Promenade des Anglais Palace', 'French Riviera Boutique', 'Côte d\'Azur Inn'] },
+            palma: { center: [39.5696, 2.6502], country: "Spain", hotels: ['Hotel Es Princep', 'Palma Cathedral View', 'Mallorca Beach Resort', 'Balearic Islands Inn', 'Mediterranean Palace'] },
+            santorini: { center: [36.3932, 25.4615], country: "Greece", hotels: ['Grace Hotel Santorini', 'Oia Sunset Villa', 'Caldera View Palace', 'Cyclades Boutique', 'Aegean Dreams Hotel'] },
+            ibiza: { center: [38.9067, 1.4206], country: "Spain", hotels: ['Nobu Hotel Ibiza Bay', 'W Ibiza', 'Beach Club Resort', 'Balearic Nights Inn', 'White Island Boutique'] }
+        };
+
+        function initializeMap() {
+            console.log('🗺️ Initializing map...');
+            map = L.map('map').setView([54.5260, 15.2551], 4); // Center on Europe
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            console.log('✅ Map initialized successfully');
+        }
+        
+        function searchHotels() {
+            console.log('🔍 Starting hotel search...');
+            
+            const city = document.getElementById('city').value;
+            const cityData = cities[city];
+            const selectedCityText = document.getElementById('city').options[document.getElementById('city').selectedIndex].text;
+            
+            if (!cityData) {
+                alert('City not found!');
+                return;
+            }
+            
+            console.log(`Searching hotels in: ${city}`);
+            
+            // Update city info
+            document.getElementById('cityInfo').style.display = 'block';
+            document.getElementById('cityName').textContent = selectedCityText;
+            document.getElementById('cityDetails').textContent = 
+                `📍 ${cityData.center[0].toFixed(2)}, ${cityData.center[1].toFixed(2)} • 🏨 ${cityData.hotels.length} hotels found`;
+            
+            // Clear existing markers
+            currentMarkers.forEach(marker => map.removeLayer(marker));
+            currentMarkers = [];
+            
+            // Move map to city
+            map.setView(cityData.center, 12);
+            
+            // Generate hotels with random prices
+            let hotelsHtml = '';
+            cityData.hotels.forEach((hotelName, index) => {
+                const price = Math.floor(Math.random() * 300) + 80; // €80-380
+                const rating = (3.5 + Math.random() * 1.5).toFixed(1); // 3.5-5.0 stars
+                
+                // Add marker to map
+                const coords = [
+                    cityData.center[0] + (Math.random() - 0.5) * 0.03,
+                    cityData.center[1] + (Math.random() - 0.5) * 0.03
+                ];
+                
+                const marker = L.marker(coords).addTo(map)
+                    .bindPopup(`<b>${hotelName}</b><br>⭐ ${rating}<br>€${price}/night`);
+                currentMarkers.push(marker);
+                
+                // Add hotel card
+                hotelsHtml += `
+                    <div class="hotel-card">
+                        <div class="hotel-name">${hotelName}</div>
+                        <div class="hotel-details">⭐ ${rating} • ${cityData.country}</div>
+                        <div class="hotel-price">€${price}/night</div>
+                    </div>
+                `;
+            });
+            
+            document.getElementById('hotelsList').innerHTML = hotelsHtml;
+            alert(`Found ${cityData.hotels.length} hotels in ${selectedCityText}!`);
+            console.log(`✅ Search completed for ${city}`);
+        }
+
+        function initializeApp() {
+            console.log('🚀 Initializing ACTIONLY...');
+            
+            // Set today's date
+            const today = new Date().toISOString().split('T')[0];
+            const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+            document.getElementById('checkin').value = today;
+            document.getElementById('checkout').value = tomorrow;
+            
+            initializeMap();
+            
+            // Make searchHotels available globally
+            window.searchHotels = searchHotels;
+            
+            console.log('✅ ACTIONLY initialized successfully');
+        }
+        
+        // Initialize when everything is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📄 Page loaded, waiting for Leaflet...');
+            waitForLeaflet().then(() => {
+                initializeApp();
+            });
+        });
+    </script>
+</body>
+</html>
