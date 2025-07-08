@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" contentf="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>ACTIONLY - Live European Hotel Search</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
@@ -178,19 +178,92 @@
             margin: 10px 0;
             text-align: center;
         }
+
+        /* Mobile fixes for GitHub Pages */
         @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-                grid-template-rows: 300px 1fr;
+            body {
+                padding: 10px !important;
             }
-            #map {
-                height: 300px;
+            .container {
+                padding: 5px !important;
             }
-            .hotels-panel {
-                height: 400px;
+            .header h1 {
+                font-size: 2.5rem !important;
+            }
+            .header p {
+                font-size: 1rem !important;
+            }
+            .search-container {
+                padding: 20px !important;
+                margin-bottom: 15px !important;
             }
             .search-form {
-                grid-template-columns: 1fr;
+                grid-template-columns: 1fr !important;
+                gap: 10px !important;
+            }
+            .form-group select, .form-group input, .search-btn {
+                min-height: 44px !important;
+                font-size: 16px !important;
+                padding: 12px !important;
+            }
+            .main-content {
+                grid-template-columns: 1fr !important;
+                height: auto !important;
+                gap: 15px !important;
+            }
+            #map {
+                height: 300px !important;
+                margin-bottom: 15px !important;
+            }
+            .hotels-panel {
+                height: 500px !important;
+                padding: 15px !important;
+            }
+            .hotel-card {
+                padding: 12px !important;
+                margin: 8px 0 !important;
+            }
+            .hotel-name {
+                font-size: 1rem !important;
+            }
+            .price {
+                font-size: 1.1rem !important;
+            }
+            .hotel-actions {
+                flex-wrap: wrap !important;
+                gap: 5px !important;
+            }
+            .action-btn {
+                flex: 1 !important;
+                min-width: 120px !important;
+                padding: 10px 8px !important;
+                font-size: 0.8rem !important;
+            }
+            #loadMoreContainer {
+                margin-top: 10px !important;
+            }
+            .status {
+                font-size: 0.9rem !important;
+                padding: 8px !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 2rem !important;
+            }
+            .search-container {
+                padding: 15px !important;
+            }
+            #map {
+                height: 250px !important;
+            }
+            .hotels-panel {
+                height: 400px !important;
+                padding: 10px !important;
+            }
+            .hotel-card {
+                padding: 10px !important;
             }
         }
     </style>
@@ -274,6 +347,11 @@
                 <div id="hotelsList">
                     <div class="loading">Click "Search Hotels" to find real hotels from Booking.com</div>
                 </div>
+                <div id="loadMoreContainer" style="display: none; text-align: center; margin-top: 15px;">
+                    <button id="loadMoreBtn" class="search-btn" style="width: 100%;">
+                        📋 Show More Hotels
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -283,22 +361,33 @@
         let map;
         let currentMarkers = [];
         let currentHotels = [];
+        let allHotelsData = [];
+        let currentlyShowing = 5;
         const BACKEND_URL = 'https://actionly.onrender.com';
+
+        // Wait for Leaflet to load properly
+        function waitForLeaflet() {
+            return new Promise((resolve) => {
+                function checkLeaflet() {
+                    if (typeof L !== 'undefined') {
+                        console.log('✅ Leaflet loaded successfully');
+                        resolve();
+                    } else {
+                        console.log('⏳ Waiting for Leaflet...');
+                        setTimeout(checkLeaflet, 100);
+                    }
+                }
+                checkLeaflet();
+            });
+        }
 
         // Initialize the application
         function initializeApp() {
             console.log('🚀 Initializing ACTIONLY with live backend...');
             
-            // Test backend connection
             testBackendConnection();
-            
-            // Initialize map
             initMap();
-            
-            // Setup event listeners
             setupEventListeners();
-            
-            // Set default dates
             setDefaultDates();
             
             console.log('✅ ACTIONLY initialized successfully');
@@ -340,6 +429,13 @@
                 });
                 console.log('📋 Form event listeners setup');
             }
+
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            if (loadMoreBtn) {
+                loadMoreBtn.addEventListener('click', function() {
+                    showMoreHotels();
+                });
+            }
         }
 
         function setDefaultDates() {
@@ -358,7 +454,6 @@
 
             console.log(`🔍 Searching hotels: ${city}, ${checkin} to ${checkout}, ${guests} guests`);
 
-            // Update UI for loading state
             const searchButton = document.getElementById('searchButton');
             const hotelsList = document.getElementById('hotelsList');
             const hotelsTitle = document.getElementById('hotelsTitle');
@@ -369,7 +464,6 @@
             hotelsTitle.innerHTML = `Hotels in ${city}`;
 
             try {
-                // Call backend API
                 const response = await fetch(`${BACKEND_URL}/api/hotels?city=${city}&checkin=${checkin}&checkout=${checkout}&adults=${guests}&rooms=1`);
                 
                 if (!response.ok) {
@@ -382,17 +476,27 @@
                     throw new Error(data.error);
                 }
 
-                // Display hotels
                 if (data.hotels && data.hotels.length > 0) {
-                    displayHotels(data.hotels, data.city);
-                    updateMap(data.hotels);
+                    allHotelsData = data.hotels;
+                    currentlyShowing = 5;
                     
-                    // Success message
+                    displayHotels(data.hotels.slice(0, 5), data.city);
+                    updateMap(data.hotels.slice(0, 5));
+                    
+                    const loadMoreContainer = document.getElementById('loadMoreContainer');
+                    if (data.hotels.length > 5) {
+                        loadMoreContainer.style.display = 'block';
+                        updateLoadMoreButton();
+                    } else {
+                        loadMoreContainer.style.display = 'none';
+                    }
+                    
                     document.getElementById('connectionStatus').innerHTML = 
-                        `✅ Found ${data.total_found} real hotels in ${data.city} from Booking.com!`;
+                        `✅ Found ${data.total_found} real hotels in ${data.city} from Booking.com! (Showing ${Math.min(5, data.hotels.length)})`;
                     document.getElementById('connectionStatus').className = 'status success-indicator';
                 } else {
                     hotelsList.innerHTML = '<div class="error">No hotels found for this city and dates.</div>';
+                    document.getElementById('loadMoreContainer').style.display = 'none';
                 }
 
             } catch (error) {
@@ -403,9 +507,34 @@
                 document.getElementById('connectionStatus').className = 'status error';
             }
 
-            // Reset button
             searchButton.disabled = false;
             searchButton.innerHTML = '🔍 Search Hotels';
+        }
+
+        function showMoreHotels() {
+            const nextBatch = Math.min(currentlyShowing + 5, allHotelsData.length);
+            const hotelsToShow = allHotelsData.slice(0, nextBatch);
+            
+            currentlyShowing = nextBatch;
+            
+            displayHotels(hotelsToShow, '');
+            updateMap(hotelsToShow);
+            updateLoadMoreButton();
+            
+            document.getElementById('connectionStatus').innerHTML = 
+                `✅ Showing ${currentlyShowing} of ${allHotelsData.length} hotels`;
+        }
+
+        function updateLoadMoreButton() {
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            const loadMoreContainer = document.getElementById('loadMoreContainer');
+            
+            if (currentlyShowing >= allHotelsData.length) {
+                loadMoreContainer.style.display = 'none';
+            } else {
+                const remaining = allHotelsData.length - currentlyShowing;
+                loadMoreBtn.innerHTML = `📋 Show ${Math.min(5, remaining)} More Hotels (${remaining} remaining)`;
+            }
         }
 
         function displayHotels(hotels, cityName) {
@@ -440,16 +569,13 @@
         }
 
         function updateMap(hotels) {
-            // Clear existing markers
             currentMarkers.forEach(marker => map.removeLayer(marker));
             currentMarkers = [];
 
             if (hotels.length > 0) {
-                // Center map on first hotel
                 const center = hotels[0].coordinates;
                 map.setView(center, 12);
 
-                // Add markers for each hotel
                 hotels.forEach((hotel, index) => {
                     const marker = L.marker(hotel.coordinates)
                         .addTo(map)
@@ -478,32 +604,14 @@
         }
 
         function highlightHotelCard(index) {
-            // Remove previous highlights
             document.querySelectorAll('.hotel-card').forEach(card => 
                 card.classList.remove('highlighted'));
 
-            // Highlight selected card
             const targetCard = document.querySelector(`[data-hotel-id="${currentHotels[index].id}"]`);
             if (targetCard) {
                 targetCard.classList.add('highlighted');
                 targetCard.scrollIntoView({behavior: 'smooth', block: 'center'});
             }
-        }
-
-        // Wait for Leaflet to load properly
-        function waitForLeaflet() {
-            return new Promise((resolve) => {
-                function checkLeaflet() {
-                    if (typeof L !== 'undefined') {
-                        console.log('✅ Leaflet loaded successfully');
-                        resolve();
-                    } else {
-                        console.log('⏳ Waiting for Leaflet...');
-                        setTimeout(checkLeaflet, 100);
-                    }
-                }
-                checkLeaflet();
-            });
         }
 
         // Initialize when page loads
