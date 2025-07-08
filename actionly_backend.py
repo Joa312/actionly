@@ -237,7 +237,7 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms):
     # Priority 2: Use hotel ID if available
     hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
     if hotel_id:
-        return f"https://www.booking.com/hotel/details.html?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+       return f"https://www.booking.com/hotel/se/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
     
     # Priority 3: Search by hotel name in the city
     hotel_name = hotel.get('name', '').replace(' ', '+')
