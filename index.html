@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ACTIONLY - Live European Hotel Search</title>
+    <title>Stayfindr - Live European Hotel Search</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
           crossorigin=""/>
@@ -44,6 +44,7 @@
             border-radius: 8px;
             font-size: 16px;
             transition: border-color 0.3s;
+            min-height: 44px;
         }
         .form-group select:focus, .form-group input:focus {
             outline: none;
@@ -59,6 +60,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.2s;
+            min-height: 44px;
         }
         .search-btn:hover {
             transform: translateY(-2px);
@@ -130,6 +132,11 @@
             font-weight: 600;
             color: #27ae60;
         }
+        .price-disclaimer {
+            font-size: 0.8rem;
+            color: #7f8c8d;
+            font-style: italic;
+        }
         .rating {
             color: #f39c12;
             font-weight: 500;
@@ -138,6 +145,7 @@
             display: flex;
             gap: 8px;
             margin-top: 10px;
+            flex-wrap: wrap;
         }
         .action-btn {
             padding: 8px 15px;
@@ -149,6 +157,8 @@
             text-decoration: none;
             display: inline-block;
             text-align: center;
+            flex: 1;
+            min-width: 120px;
         }
         .book-btn {
             background: #27ae60;
@@ -178,8 +188,16 @@
             margin: 10px 0;
             text-align: center;
         }
+        #loadMoreContainer {
+            text-align: center;
+            margin-top: 15px;
+            display: none;
+        }
+        #loadMoreBtn {
+            width: 100%;
+        }
 
-        /* Mobile fixes for GitHub Pages */
+        /* Mobile optimizations */
         @media (max-width: 768px) {
             body {
                 padding: 10px !important;
@@ -271,7 +289,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🏨 ACTIONLY</h1>
+            <h1>🏨 STAYFINDR</h1>
             <p>Live European Hotel Search - Real Data from Booking.com</p>
         </div>
         
@@ -347,8 +365,8 @@
                 <div id="hotelsList">
                     <div class="loading">Click "Search Hotels" to find real hotels from Booking.com</div>
                 </div>
-                <div id="loadMoreContainer" style="display: none; text-align: center; margin-top: 15px;">
-                    <button id="loadMoreBtn" class="search-btn" style="width: 100%;">
+                <div id="loadMoreContainer">
+                    <button id="loadMoreBtn" class="search-btn">
                         📋 Show More Hotels
                     </button>
                 </div>
@@ -383,14 +401,14 @@
 
         // Initialize the application
         function initializeApp() {
-            console.log('🚀 Initializing ACTIONLY with live backend...');
+            console.log('🚀 Initializing STAYFINDR with live backend...');
             
             testBackendConnection();
             initMap();
             setupEventListeners();
             setDefaultDates();
             
-            console.log('✅ ACTIONLY initialized successfully');
+            console.log('✅ STAYFINDR initialized successfully');
         }
 
         async function testBackendConnection() {
@@ -492,7 +510,7 @@
                     }
                     
                     document.getElementById('connectionStatus').innerHTML = 
-                        `✅ Found ${data.total_found} real hotels in ${data.city} from Booking.com! (Showing ${Math.min(5, data.hotels.length)})`;
+                        `✅ Found ${data.total_found || data.hotels.length} real hotels in ${data.city} from Booking.com! (Showing ${Math.min(5, data.hotels.length)})`;
                     document.getElementById('connectionStatus').className = 'status success-indicator';
                 } else {
                     hotelsList.innerHTML = '<div class="error">No hotels found for this city and dates.</div>';
@@ -553,7 +571,10 @@
                         <div class="hotel-name">${hotel.name}</div>
                         <div class="hotel-details">📍 ${hotel.address}</div>
                         <div class="price-info">
-                            <span class="price">${priceDisplay}</span>
+                            <div>
+                                <span class="price">${priceDisplay}</span>
+                                <div class="price-disclaimer">Final price may vary on Booking.com</div>
+                            </div>
                             <span class="rating">${stars} ${hotel.rating}/5</span>
                         </div>
                         <div class="hotel-actions">

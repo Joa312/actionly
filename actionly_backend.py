@@ -1,4 +1,7 @@
-# ACTIONLY FLASK BACKEND - Real Hotel Data for 29 European Cities
+# STAYFINDR BACKEND - European Hotel Search Engine
+# Flask backend with RapidAPI Booking.com integration
+
+import os
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import requests
@@ -7,172 +10,169 @@ import time
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # Allow cross-origin requests from frontend
+CORS(app)
 
-# Your working RapidAPI key
+# RapidAPI Configuration
 RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
+RAPIDAPI_HOST = "booking-com18.p.rapidapi.com"
 
-# 29 European cities with their location IDs (we'll populate these)
+# European Cities Configuration - 29 major destinations
 CITIES = {
     'stockholm': {
         'name': 'Stockholm, Sweden',
-        'location_id': 'eyJjaXR5X25hbWUiOiJTdG9ja2hvbG0iLCJjb3VudHJ5IjoiU3dlZGVuIiwiZGVzdF9pZCI6Ii0yNTI0Mjc5IiwiZGVzdF90eXBlIjoiY2l0eSJ9',
-        'coordinates': [59.3293, 18.0686]
+        'coordinates': [59.3293, 18.0686],
+        'search_query': 'Stockholm Sweden'
     },
     'paris': {
         'name': 'Paris, France', 
-        'location_id': None,  # Will be populated
-        'coordinates': [48.8566, 2.3522]
+        'coordinates': [48.8566, 2.3522],
+        'search_query': 'Paris France'
     },
     'london': {
         'name': 'London, UK',
-        'location_id': None,
-        'coordinates': [51.5074, -0.1278]
+        'coordinates': [51.5074, -0.1278],
+        'search_query': 'London United Kingdom'
     },
     'amsterdam': {
         'name': 'Amsterdam, Netherlands',
-        'location_id': None,
-        'coordinates': [52.3676, 4.9041]
+        'coordinates': [52.3676, 4.9041],
+        'search_query': 'Amsterdam Netherlands'
     },
     'barcelona': {
         'name': 'Barcelona, Spain',
-        'location_id': None,
-        'coordinates': [41.3851, 2.1734]
+        'coordinates': [41.3851, 2.1734],
+        'search_query': 'Barcelona Spain'
     },
     'rome': {
         'name': 'Rome, Italy',
-        'location_id': None,
-        'coordinates': [41.9028, 12.4964]
+        'coordinates': [41.9028, 12.4964],
+        'search_query': 'Rome Italy'
     },
     'berlin': {
         'name': 'Berlin, Germany',
-        'location_id': None,
-        'coordinates': [52.5200, 13.4050]
+        'coordinates': [52.5200, 13.4050],
+        'search_query': 'Berlin Germany'
     },
     'copenhagen': {
         'name': 'Copenhagen, Denmark',
-        'location_id': None,
-        'coordinates': [55.6761, 12.5683]
+        'coordinates': [55.6761, 12.5683],
+        'search_query': 'Copenhagen Denmark'
     },
     'vienna': {
         'name': 'Vienna, Austria',
-        'location_id': None,
-        'coordinates': [48.2082, 16.3738]
+        'coordinates': [48.2082, 16.3738],
+        'search_query': 'Vienna Austria'
     },
     'prague': {
         'name': 'Prague, Czech Republic',
-        'location_id': None,
-        'coordinates': [50.0755, 14.4378]
+        'coordinates': [50.0755, 14.4378],
+        'search_query': 'Prague Czech Republic'
     },
     'madrid': {
         'name': 'Madrid, Spain',
-        'location_id': None,
-        'coordinates': [40.4168, -3.7038]
+        'coordinates': [40.4168, -3.7038],
+        'search_query': 'Madrid Spain'
     },
     'milano': {
         'name': 'Milano, Italy',
-        'location_id': None,
-        'coordinates': [45.4642, 9.1900]
+        'coordinates': [45.4642, 9.1900],
+        'search_query': 'Milano Italy'
     },
     'zurich': {
         'name': 'Zürich, Switzerland',
-        'location_id': None,
-        'coordinates': [47.3769, 8.5417]
+        'coordinates': [47.3769, 8.5417],
+        'search_query': 'Zürich Switzerland'
     },
     'oslo': {
         'name': 'Oslo, Norway',
-        'location_id': None,
-        'coordinates': [59.9139, 10.7522]
+        'coordinates': [59.9139, 10.7522],
+        'search_query': 'Oslo Norway'
     },
     'helsinki': {
         'name': 'Helsinki, Finland',
-        'location_id': None,
-        'coordinates': [60.1699, 24.9384]
+        'coordinates': [60.1695, 24.9354],
+        'search_query': 'Helsinki Finland'
     },
     'warsaw': {
         'name': 'Warsaw, Poland',
-        'location_id': None,
-        'coordinates': [52.2297, 21.0122]
+        'coordinates': [52.2297, 21.0122],
+        'search_query': 'Warsaw Poland'
     },
     'budapest': {
         'name': 'Budapest, Hungary',
-        'location_id': None,
-        'coordinates': [47.4979, 19.0402]
+        'coordinates': [47.4979, 19.0402],
+        'search_query': 'Budapest Hungary'
     },
     'dublin': {
         'name': 'Dublin, Ireland',
-        'location_id': None,
-        'coordinates': [53.3498, -6.2603]
+        'coordinates': [53.3498, -6.2603],
+        'search_query': 'Dublin Ireland'
     },
     'lisbon': {
         'name': 'Lisbon, Portugal',
-        'location_id': None,
-        'coordinates': [38.7223, -9.1393]
+        'coordinates': [38.7223, -9.1393],
+        'search_query': 'Lisbon Portugal'
     },
     'brussels': {
         'name': 'Brussels, Belgium',
-        'location_id': None,
-        'coordinates': [50.8503, 4.3517]
+        'coordinates': [50.8503, 4.3517],
+        'search_query': 'Brussels Belgium'
     },
     'athens': {
         'name': 'Athens, Greece',
-        'location_id': None,
-        'coordinates': [37.9838, 23.7275]
+        'coordinates': [37.9838, 23.7275],
+        'search_query': 'Athens Greece'
     },
     'munich': {
         'name': 'Munich, Germany',
-        'location_id': None,
-        'coordinates': [48.1351, 11.5820]
+        'coordinates': [48.1351, 11.5820],
+        'search_query': 'Munich Germany'
     },
     'lyon': {
         'name': 'Lyon, France',
-        'location_id': None,
-        'coordinates': [45.7640, 4.8357]
+        'coordinates': [45.7640, 4.8357],
+        'search_query': 'Lyon France'
     },
     'florence': {
         'name': 'Florence, Italy',
-        'location_id': None,
-        'coordinates': [43.7696, 11.2558]
+        'coordinates': [43.7696, 11.2558],
+        'search_query': 'Florence Italy'
     },
     'edinburgh': {
         'name': 'Edinburgh, Scotland',
-        'location_id': None,
-        'coordinates': [55.9533, -3.1883]
+        'coordinates': [55.9533, -3.1883],
+        'search_query': 'Edinburgh Scotland'
     },
     'nice': {
         'name': 'Nice, France',
-        'location_id': None,
-        'coordinates': [43.7102, 7.2620]
+        'coordinates': [43.7102, 7.2620],
+        'search_query': 'Nice France'
     },
     'palma': {
         'name': 'Palma, Spain',
-        'location_id': None,
-        'coordinates': [39.5696, 2.6502]
+        'coordinates': [39.5696, 2.6502],
+        'search_query': 'Palma Spain'
     },
     'santorini': {
         'name': 'Santorini, Greece',
-        'location_id': None,
-        'coordinates': [36.3932, 25.4615]
+        'coordinates': [36.3932, 25.4615],
+        'search_query': 'Santorini Greece'
     },
     'ibiza': {
         'name': 'Ibiza, Spain',
-        'location_id': None,
-        'coordinates': [38.9067, 1.4206]
+        'coordinates': [38.9067, 1.4206],
+        'search_query': 'Ibiza Spain'
     }
 }
 
-def find_city_location_id(city_name):
-    """Find location ID for a city using RapidAPI autocomplete"""
+def get_location_id(city_query):
+    """Get Booking.com location ID for a city"""
     url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
     
-    querystring = {
-        "query": city_name,
-        "languageCode": "en"
-    }
-    
+    querystring = {"query": city_query, "languageCode": "en"}
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": "booking-com18.p.rapidapi.com"
+        "x-rapidapi-host": RAPIDAPI_HOST
     }
     
     try:
@@ -180,171 +180,204 @@ def find_city_location_id(city_name):
         if response.status_code == 200:
             data = response.json()
             if 'data' in data and data['data']:
-                return data['data'][0]['id']
+                return data['data'][0].get('id')
     except Exception as e:
-        print(f"Error finding location for {city_name}: {e}")
+        print(f"Error getting location ID: {e}")
     
     return None
 
-def get_hotels_for_city(city_key, checkin_date, checkout_date, adults=2, rooms=1):
-    """Get real hotel data for a city"""
-    
-    if city_key not in CITIES:
-        return {'error': f'City {city_key} not found'}
-    
-    city_info = CITIES[city_key]
-    location_id = city_info['location_id']
-    
-    # If we don't have location_id, try to find it
-    if not location_id:
-        print(f"Finding location ID for {city_info['name']}...")
-        location_id = find_city_location_id(city_info['name'])
-        if location_id:
-            CITIES[city_key]['location_id'] = location_id
-        else:
-            return {'error': f'Could not find location ID for {city_info["name"]}'}
-    
-    # Get hotels from Booking.com
+def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
+    """Search hotels using Booking.com API"""
     url = "https://booking-com18.p.rapidapi.com/stays/search"
     
     querystring = {
         "locationId": location_id,
-        "checkinDate": checkin_date,
-        "checkoutDate": checkout_date,
-        "adults": str(adults),
-        "rooms": str(rooms),
+        "checkinDate": checkin,
+        "checkoutDate": checkout,
+        "adults": adults,
+        "rooms": rooms,
         "currency": "EUR"
     }
     
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": "booking-com18.p.rapidapi.com"
+        "x-rapidapi-host": RAPIDAPI_HOST
     }
     
     try:
         response = requests.get(url, headers=headers, params=querystring)
-        
         if response.status_code == 200:
-            data = response.json()
-            hotels_data = data.get('data', [])
-            
-            # Convert to ACTIONLY format - GET ALL HOTELS
-            hotels = []
-            for i, hotel in enumerate(hotels_data):  # Get ALL hotels from API (all 21!)
-                
-                # Extract price information
-                price = 'N/A'
-                if 'priceBreakdown' in hotel:
-                    price_info = hotel['priceBreakdown'].get('grossPrice', {})
-                    if 'value' in price_info:
-                        total_price = price_info['value']
-                        # Calculate per night (assuming 7 nights default)
-                        try:
-                            from datetime import datetime
-                            checkin = datetime.strptime(checkin_date, '%Y-%m-%d')
-                            checkout = datetime.strptime(checkout_date, '%Y-%m-%d')
-                            nights = (checkout - checkin).days
-                            if nights > 0:
-                                price = round(total_price / nights)
-                            else:
-                                price = total_price
-                        except:
-                            price = total_price
-                
-                # Extract real coordinates from API
-                latitude = hotel.get('latitude')
-                longitude = hotel.get('longitude')
-                
-                # Use real coordinates if available, otherwise fallback to city center with small offset
-                if latitude and longitude:
-                    coordinates = [float(latitude), float(longitude)]
-                else:
-                    # Fallback with small random offset
-                    import random
-                    coordinates = [
-                        city_info['coordinates'][0] + (random.uniform(-0.02, 0.02)),
-                        city_info['coordinates'][1] + (random.uniform(-0.02, 0.02))
-                    ]
-                
-                hotel_data = {
-                    'id': i + 1,
-                    'name': hotel.get('name', f'Hotel {i+1}'),
-                    'price': price,
-                    'currency': 'EUR',
-                    'rating': round(hotel.get('reviewScore', 8.0) / 2, 1),  # Convert to 5-star scale
-                    'coordinates': coordinates,
-                    'address': hotel.get('address', city_info['name']),  # Real hotel address
-                    'booking_url': f"https://booking.com/hotel/{hotel.get('id', '')}"
-                }
-                
-                hotels.append(hotel_data)
-            
-            return {
-                'success': True,
-                'city': city_info['name'],
-                'hotels': hotels,
-                'total_found': len(hotels_data)
-            }
-        
-        else:
-            return {'error': f'API error: {response.status_code}'}
-    
+            return response.json()
     except Exception as e:
-        return {'error': f'Exception: {str(e)}'}
+        print(f"Error searching hotels: {e}")
+    
+    return None
+
+def process_hotel_data(hotels_data, city_info):
+    """Process and format hotel data"""
+    processed_hotels = []
+    
+    for i, hotel in enumerate(hotels_data):
+        # Extract hotel information
+        hotel_name = hotel.get('name', 'Unknown Hotel')
+        
+        # Get real coordinates if available, otherwise use city center with offset
+        latitude = hotel.get('latitude')
+        longitude = hotel.get('longitude')
+        
+        if latitude and longitude:
+            coordinates = [float(latitude), float(longitude)]
+        else:
+            # Fallback: spread around city center
+            base_lat, base_lng = city_info['coordinates']
+            coordinates = [
+                base_lat + (i * 0.01) - 0.05,
+                base_lng + (i * 0.01) - 0.05
+            ]
+        
+        # Extract pricing information
+        price = 'N/A'
+        if 'priceBreakdown' in hotel:
+            price_info = hotel['priceBreakdown'].get('grossPrice', {})
+            if 'value' in price_info:
+                # Convert to per night if total price
+                total_price = price_info['value']
+                try:
+                    # Estimate per night (assuming booking is for multiple nights)
+                    price = int(total_price / 7)  # Assume 7-night booking for now
+                except:
+                    price = total_price
+        
+        # Extract rating
+        rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
+        if rating:
+            rating = float(rating) / 2 if rating > 5 else float(rating)  # Normalize to 5-point scale
+        else:
+            rating = 4.0
+        
+        # Extract address
+        address = hotel.get('address', city_info['name'])
+        
+        # Create booking URL
+        hotel_id = hotel.get('id', '')
+        booking_url = f"https://www.booking.com/hotel/searchresults.html?ss={city_info['name']}"
+        
+        processed_hotel = {
+            'id': hotel_id or f"hotel_{i}",
+            'name': hotel_name,
+            'address': address,
+            'coordinates': coordinates,
+            'price': price,
+            'rating': rating,
+            'booking_url': booking_url
+        }
+        
+        processed_hotels.append(processed_hotel)
+    
+    return processed_hotels
 
 @app.route('/')
 def home():
-    """Simple test page"""
+    """API Documentation Page"""
     return render_template_string('''
-    <h1>🏨 ACTIONLY Backend API</h1>
-    <p>Flask backend for European hotel search</p>
-    <h3>Available endpoints:</h3>
-    <ul>
-        <li><a href="/api/hotels?city=stockholm&checkin=2025-07-14&checkout=2025-07-21">/api/hotels</a> - Get hotels for a city</li>
-        <li><a href="/api/cities">/api/cities</a> - List all 29 cities</li>
-        <li><a href="/test">/test</a> - Test Stockholm hotels</li>
-    </ul>
-    <p>Cities supported: {{ cities }}</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🏨 STAYFINDR Backend API</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+            h1 { color: #2c3e50; }
+            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
+            .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
+            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
+        </style>
+    </head>
+    <body>
+        <h1>🏨 STAYFINDR Backend API</h1>
+        <p>Flask backend for European hotel search</p>
+        
+        <h2>Available endpoints:</h2>
+        <div class="endpoint">
+            <strong>/api/hotels</strong> - Get hotels for a city<br>
+            Parameters: city, checkin, checkout, adults, rooms
+        </div>
+        <div class="endpoint">
+            <strong>/api/cities</strong> - List all 29 cities
+        </div>
+        <div class="endpoint">
+            <strong>/test</strong> - Test Stockholm hotels
+        </div>
+        
+        <h2>Cities supported:</h2>
+        <div class="cities">
+            {% for city in cities %}
+            <div class="city">{{ city }}</div>
+            {% endfor %}
+        </div>
+    </body>
+    </html>
     ''', cities=list(CITIES.keys()))
 
 @app.route('/api/cities')
 def get_cities():
-    """Get list of all supported cities"""
+    """Get all supported cities"""
     return jsonify({
-        'cities': {key: {'name': value['name'], 'coordinates': value['coordinates']} 
-                  for key, value in CITIES.items()}
+        'cities': CITIES,
+        'total': len(CITIES)
     })
 
 @app.route('/api/hotels')
 def get_hotels():
-    """Main API endpoint for ACTIONLY frontend"""
-    
-    # Get parameters
+    """Get hotels for a specific city"""
     city = request.args.get('city', 'stockholm')
     checkin = request.args.get('checkin', '2025-07-14')
     checkout = request.args.get('checkout', '2025-07-21')
-    adults = int(request.args.get('adults', 2))
-    rooms = int(request.args.get('rooms', 1))
+    adults = request.args.get('adults', '2')
+    rooms = request.args.get('rooms', '1')
     
-    print(f"API Request: {city}, {checkin} to {checkout}, {adults} adults")
+    if city not in CITIES:
+        return jsonify({'error': f'City {city} not supported'}), 400
     
-    # Get hotel data
-    result = get_hotels_for_city(city, checkin, checkout, adults, rooms)
+    city_info = CITIES[city]
     
-    return jsonify(result)
+    # Get location ID for the city
+    location_id = get_location_id(city_info['search_query'])
+    
+    if not location_id:
+        return jsonify({'error': f'Could not find location ID for {city}'}), 404
+    
+    # Search hotels
+    hotels_data = search_hotels_booking_api(location_id, checkin, checkout, adults, rooms)
+    
+    if not hotels_data or 'data' not in hotels_data:
+        return jsonify({'error': 'No hotels found'}), 404
+    
+    # Process hotel data
+    processed_hotels = process_hotel_data(hotels_data['data'], city_info)
+    
+    return jsonify({
+        'city': city_info['name'],
+        'hotels': processed_hotels,
+        'total_found': len(processed_hotels),
+        'search_params': {
+            'checkin': checkin,
+            'checkout': checkout, 
+            'adults': adults,
+            'rooms': rooms
+        }
+    })
 
 @app.route('/test')
 def test_stockholm():
-    """Test endpoint with Stockholm"""
-    result = get_hotels_for_city('stockholm', '2025-07-14', '2025-07-21')
-    return jsonify(result)
+    """Test endpoint with Stockholm hotels"""
+    return get_hotels()
 
 if __name__ == '__main__':
-    print("🚀 Starting ACTIONLY Backend...")
+    print("🚀 Starting STAYFINDR Backend...")
     print("🏨 Supporting 29 European cities")
     print("🔗 Frontend will connect to: http://localhost:5000")
     print("📋 Test API: http://localhost:5000/test")
     
-    import os
-port = int(os.environ.get('PORT', 5000))
-app.run(debug=True, host='0.0.0.0', port=port)
+    # Use PORT environment variable for deployment (Render, Heroku, etc.)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
