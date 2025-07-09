@@ -1,6 +1,6 @@
 # STAYFINDR BACKEND - European Hotel Search Engine
 # Flask backend with RapidAPI Booking.com integration
-# FIXED: Direct hotel booking URLs with dynamic country codes
+# FIXED: Hotel name-based booking URLs for better targeting
 
 import os
 from flask import Flask, request, jsonify, render_template_string
@@ -9,6 +9,7 @@ import requests
 import json
 import time
 from datetime import datetime
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
 CORS(app)
@@ -168,16 +169,16 @@ CITIES = {
 
 # Country codes for Booking.com URLs based on city
 COUNTRY_CODES = {
-    'stockholm': 'se', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
+    'stockholm': 'sv', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
     'paris': 'fr', 'lyon': 'fr', 'nice': 'fr',
-    'london': 'gb', 'edinburgh': 'gb',
-    'amsterdam': 'nl', 'brussels': 'be',
+    'london': 'en-gb', 'edinburgh': 'en-gb',
+    'amsterdam': 'nl', 'brussels': 'nl',
     'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es',
     'rome': 'it', 'milano': 'it', 'florence': 'it',
     'berlin': 'de', 'munich': 'de',
-    'vienna': 'at', 'zurich': 'ch',
-    'prague': 'cz', 'warsaw': 'pl', 'budapest': 'hu',
-    'dublin': 'ie', 'lisbon': 'pt', 'athens': 'gr', 'santorini': 'gr'
+    'vienna': 'de', 'zurich': 'de',
+    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu',
+    'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
 }
 
 def get_location_id(city_query):
@@ -229,7 +230,7 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     return None
 
 def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key):
-    """Create the best possible booking URL for the hotel with correct country"""
+    """Create hotel name-based booking URL for better targeting"""
     
     # Priority 1: Use direct hotel URL from API if available
     direct_urls = [
@@ -248,18 +249,45 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_
             else:
                 return f"{url}?checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
     
-    # Priority 2: Use hotel ID if available with correct country code
+    # Priority 2: Create hotel name-based search URL (IMPROVED METHOD)
     hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
-    if hotel_id:
-        # Get country code for the city
-        country_code = COUNTRY_CODES.get(city_key, 'com')  # Default to .com if not found
-        return f"https://www.booking.com/hotel/{country_code}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    hotel_name = hotel.get('name', 'Hotel')
     
-    # Priority 3: Search by hotel name in the city
+    if hotel_id and hotel_name:
+        # Get country code for the city
+        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+        
+        # Encode hotel name properly for URL
+        hotel_name_encoded = quote_plus(hotel_name)
+        
+        # Create hotel name-based search URL similar to your example
+        base_params = {
+            'ss': hotel_name,  # Hotel search string
+            'dest_id': hotel_id,  # Hotel destination ID
+            'dest_type': 'hotel',  # Specify it's a hotel
+            'checkin': checkin,
+            'checkout': checkout,
+            'group_adults': adults,
+            'no_rooms': rooms,
+            'group_children': 0,
+            'search_selected': 'true'
+        }
+        
+        # Build URL parameters
+        params_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in base_params.items()])
+        
+        return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
+    
+    # Priority 3: Fallback to hotel ID-based URL
+    if hotel_id:
+        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+        return f"https://www.booking.com/hotel/{country_code.split('-')[0]}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    
+    # Priority 4: Generic search by hotel name in the city
     hotel_name = hotel.get('name', '').replace(' ', '+')
     city_name = city_info['name'].replace(' ', '+')
-    country_code = COUNTRY_CODES.get(city_key, 'com')
-    return f"https://www.booking.com/searchresults.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+    return f"https://www.booking.com/searchresults.{country_code}.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
 
 def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms, city_key):
     """Process and format hotel data with proper booking URLs"""
@@ -315,7 +343,7 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms,
         # Extract address
         address = hotel.get('address', city_info['name'])
         
-        # Create optimized booking URL with correct country
+        # Create optimized booking URL with hotel name
         booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key)
         
         processed_hotel = {
@@ -351,18 +379,18 @@ def home():
     </head>
     <body>
         <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend for European hotel search with localized booking URLs</p>
+        <p>Flask backend for European hotel search with hotel name-based booking URLs</p>
         
         <div class="feature">
-            <strong>✅ NEW: Country-Specific Booking URLs</strong><br>
-            CTA buttons now link to correct local Booking.com sites (ES for Spain, FR for France, etc.)
+            <strong>✅ NEW: Hotel Name-Based Booking URLs</strong><br>
+            CTA buttons now use hotel names for better targeting and SEO, similar to native Booking.com searches
         </div>
         
         <h2>Available endpoints:</h2>
         <div class="endpoint">
             <strong>/api/hotels</strong> - Get hotels for a city<br>
             Parameters: city, checkin, checkout, adults, rooms<br>
-            <em>Now with localized booking URLs</em>
+            <em>Now with improved hotel name-based URLs</em>
         </div>
         <div class="endpoint">
             <strong>/api/cities</strong> - List all 29 cities
@@ -391,7 +419,7 @@ def get_cities():
 
 @app.route('/api/hotels')
 def get_hotels():
-    """Get hotels for a specific city with localized booking URLs"""
+    """Get hotels for a specific city with hotel name-based booking URLs"""
     city = request.args.get('city', 'stockholm')
     checkin = request.args.get('checkin', '2025-07-14')
     checkout = request.args.get('checkout', '2025-07-21')
@@ -415,7 +443,7 @@ def get_hotels():
     if not hotels_data or 'data' not in hotels_data:
         return jsonify({'error': 'No hotels found'}), 404
     
-    # Process hotel data with localized booking URLs - limit to top 50
+    # Process hotel data with hotel name-based booking URLs - limit to top 50
     processed_hotels = process_hotel_data(
         hotels_data['data'][:50], 
         city_info, 
@@ -437,7 +465,8 @@ def get_hotels():
             'rooms': rooms
         },
         'booking_optimization': 'enabled',
-        'localization': 'enabled'
+        'localization': 'enabled',
+        'url_type': 'hotel_name_based'
     })
 
 @app.route('/test')
@@ -448,10 +477,10 @@ def test_stockholm():
 if __name__ == '__main__':
     print("🚀 Starting STAYFINDR Backend...")
     print("🏨 Supporting 29 European cities")
-    print("🌍 NEW: Localized booking URLs for each country")
+    print("🌍 NEW: Hotel name-based booking URLs")
     print("🔗 Frontend will connect to: http://localhost:5000")
     print("📋 Test API: http://localhost:5000/test")
-    print("✅ Country-specific Booking.com integration enabled")
+    print("✅ Improved Booking.com integration with hotel names")
     
     # Use PORT environment variable for deployment (Render, Heroku, etc.)
     port = int(os.environ.get('PORT', 5000))
