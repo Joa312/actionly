@@ -398,8 +398,8 @@ def get_hotels():
     if not hotels_data or 'data' not in hotels_data:
         return jsonify({'error': 'No hotels found'}), 404
     
-    # Process hotel data with optimized booking URLs
-  # Process hotel data with optimized booking URLs - limit to top 50
+
+# Process hotel data with optimized booking URLs - limit to top 50
 processed_hotels = process_hotel_data(
     hotels_data['data'][:50], 
     city_info, 
