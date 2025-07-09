@@ -1,613 +1,682 @@
-# STAYFINDR BACKEND - European Hotel Search Engine
-# Flask backend with RapidAPI Booking.com integration
-# FIXED: Hotel name-based booking URLs + Room Type Filter with Junior Suite
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>STAYFINDR - European Hotel Search</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"     
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="     
+          crossorigin=""/>
+    <style>
+        body {     
+            font-family: 'Segoe UI', sans-serif;     
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0; padding: 20px; min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 {   
+            font-size: 3rem;   
+            font-weight: 700;   
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .header p { font-size: 1.2rem; opacity: 0.9; }
+        .status { text-align: center; color: white; margin-bottom: 20px; }
+        .search-container {     
+            background: rgba(255,255,255,0.95);     
+            border-radius: 20px; padding: 30px; margin-bottom: 30px;     
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .search-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            align-items: end;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group label {
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        .form-group select, .form-group input {
+            padding: 12px;
+            border: 2px solid #ecf0f1;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        .form-group select:focus, .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .search-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .search-btn:hover {
+            transform: translateY(-2px);
+        }
+        .search-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .main-content {     
+            display: grid;     
+            grid-template-columns: 1fr 400px;     
+            gap: 30px;     
+            height: 600px;     
+        }
+        #map {     
+            border-radius: 15px;     
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .hotels-panel {     
+            background: rgba(255,255,255,0.95);     
+            border-radius: 15px;     
+            padding: 25px;     
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .hotels-panel h3 {
+            margin-bottom: 20px;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .hotel-card {     
+            background: white;     
+            border-radius: 10px;     
+            padding: 15px;     
+            margin: 10px 0;     
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .hotel-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .hotel-card.highlighted {
+            border: 2px solid #3498db;
+            background: #f8f9fa;
+        }
+        .hotel-name {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            font-size: 1.1rem;
+        }
+        .hotel-details {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+        .price-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .price {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #27ae60;
+        }
+        .rating {
+            color: #f39c12;
+            font-weight: 500;
+        }
+        .hotel-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .action-btn {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        .book-btn {
+            background: #27ae60;
+            color: white;
+            flex: 1;
+        }
+        .book-btn:hover {
+            background: #229954;
+        }
+        .loading {
+            text-align: center;
+            color: #7f8c8d;
+            padding: 20px;
+        }
+        .error {
+            text-align: center;
+            color: #e74c3c;
+            padding: 20px;
+            background: #fdf2f2;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .success-indicator {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            text-align: center;
+        }
 
-import os
-from flask import Flask, request, jsonify, render_template_string
-from flask_cors import CORS
-import requests
-import json
-import time
-from datetime import datetime
-from urllib.parse import quote_plus
+        /* Mobile fixes */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px !important;
+            }
+            .container {
+                padding: 5px !important;
+            }
+            .header h1 {
+                font-size: 2.5rem !important;
+            }
+            .header p {
+                font-size: 1rem !important;
+            }
+            .search-container {
+                padding: 20px !important;
+                margin-bottom: 15px !important;
+            }
+            .search-form {
+                grid-template-columns: 1fr !important;
+                gap: 10px !important;
+            }
+            .form-group select, .form-group input, .search-btn {
+                min-height: 44px !important;
+                font-size: 16px !important;
+                padding: 12px !important;
+            }
+            .main-content {
+                grid-template-columns: 1fr !important;
+                height: auto !important;
+                gap: 15px !important;
+            }
+            #map {
+                height: 300px !important;
+                margin-bottom: 15px !important;
+            }
+            .hotels-panel {
+                height: 500px !important;
+                padding: 15px !important;
+            }
+            .hotel-card {
+                padding: 12px !important;
+                margin: 8px 0 !important;
+            }
+            .hotel-name {
+                font-size: 1rem !important;
+            }
+            .price {
+                font-size: 1.1rem !important;
+            }
+            .hotel-actions {
+                flex-wrap: wrap !important;
+                gap: 5px !important;
+            }
+            .action-btn {
+                flex: 1 !important;
+                min-width: 120px !important;
+                padding: 10px 8px !important;
+                font-size: 0.8rem !important;
+            }
+            #loadMoreContainer {
+                margin-top: 10px !important;
+            }
+            .status {
+                font-size: 0.9rem !important;
+                padding: 8px !important;
+            }
+        }
 
-app = Flask(__name__)
-CORS(app)
-
-# RapidAPI Configuration
-RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
-RAPIDAPI_HOST = "booking-com18.p.rapidapi.com"
-
-# European Cities Configuration - 29 major destinations
-CITIES = {
-    'stockholm': {
-        'name': 'Stockholm, Sweden',
-        'coordinates': [59.3293, 18.0686],
-        'search_query': 'Stockholm Sweden'
-    },
-    'paris': {
-        'name': 'Paris, France', 
-        'coordinates': [48.8566, 2.3522],
-        'search_query': 'Paris France'
-    },
-    'london': {
-        'name': 'London, UK',
-        'coordinates': [51.5074, -0.1278],
-        'search_query': 'London United Kingdom'
-    },
-    'amsterdam': {
-        'name': 'Amsterdam, Netherlands',
-        'coordinates': [52.3676, 4.9041],
-        'search_query': 'Amsterdam Netherlands'
-    },
-    'barcelona': {
-        'name': 'Barcelona, Spain',
-        'coordinates': [41.3851, 2.1734],
-        'search_query': 'Barcelona Spain'
-    },
-    'rome': {
-        'name': 'Rome, Italy',
-        'coordinates': [41.9028, 12.4964],
-        'search_query': 'Rome Italy'
-    },
-    'berlin': {
-        'name': 'Berlin, Germany',
-        'coordinates': [52.5200, 13.4050],
-        'search_query': 'Berlin Germany'
-    },
-    'copenhagen': {
-        'name': 'Copenhagen, Denmark',
-        'coordinates': [55.6761, 12.5683],
-        'search_query': 'Copenhagen Denmark'
-    },
-    'vienna': {
-        'name': 'Vienna, Austria',
-        'coordinates': [48.2082, 16.3738],
-        'search_query': 'Vienna Austria'
-    },
-    'prague': {
-        'name': 'Prague, Czech Republic',
-        'coordinates': [50.0755, 14.4378],
-        'search_query': 'Prague Czech Republic'
-    },
-    'madrid': {
-        'name': 'Madrid, Spain',
-        'coordinates': [40.4168, -3.7038],
-        'search_query': 'Madrid Spain'
-    },
-    'milano': {
-        'name': 'Milano, Italy',
-        'coordinates': [45.4642, 9.1900],
-        'search_query': 'Milano Italy'
-    },
-    'zurich': {
-        'name': 'Zürich, Switzerland',
-        'coordinates': [47.3769, 8.5417],
-        'search_query': 'Zürich Switzerland'
-    },
-    'oslo': {
-        'name': 'Oslo, Norway',
-        'coordinates': [59.9139, 10.7522],
-        'search_query': 'Oslo Norway'
-    },
-    'helsinki': {
-        'name': 'Helsinki, Finland',
-        'coordinates': [60.1695, 24.9354],
-        'search_query': 'Helsinki Finland'
-    },
-    'warsaw': {
-        'name': 'Warsaw, Poland',
-        'coordinates': [52.2297, 21.0122],
-        'search_query': 'Warsaw Poland'
-    },
-    'budapest': {
-        'name': 'Budapest, Hungary',
-        'coordinates': [47.4979, 19.0402],
-        'search_query': 'Budapest Hungary'
-    },
-    'dublin': {
-        'name': 'Dublin, Ireland',
-        'coordinates': [53.3498, -6.2603],
-        'search_query': 'Dublin Ireland'
-    },
-    'lisbon': {
-        'name': 'Lisbon, Portugal',
-        'coordinates': [38.7223, -9.1393],
-        'search_query': 'Lisbon Portugal'
-    },
-    'brussels': {
-        'name': 'Brussels, Belgium',
-        'coordinates': [50.8503, 4.3517],
-        'search_query': 'Brussels Belgium'
-    },
-    'athens': {
-        'name': 'Athens, Greece',
-        'coordinates': [37.9838, 23.7275],
-        'search_query': 'Athens Greece'
-    },
-    'munich': {
-        'name': 'Munich, Germany',
-        'coordinates': [48.1351, 11.5820],
-        'search_query': 'Munich Germany'
-    },
-    'lyon': {
-        'name': 'Lyon, France',
-        'coordinates': [45.7640, 4.8357],
-        'search_query': 'Lyon France'
-    },
-    'florence': {
-        'name': 'Florence, Italy',
-        'coordinates': [43.7696, 11.2558],
-        'search_query': 'Florence Italy'
-    },
-    'edinburgh': {
-        'name': 'Edinburgh, Scotland',
-        'coordinates': [55.9533, -3.1883],
-        'search_query': 'Edinburgh Scotland'
-    },
-    'nice': {
-        'name': 'Nice, France',
-        'coordinates': [43.7102, 7.2620],
-        'search_query': 'Nice France'
-    },
-    'palma': {
-        'name': 'Palma, Spain',
-        'coordinates': [39.5696, 2.6502],
-        'search_query': 'Palma Spain'
-    },
-    'santorini': {
-        'name': 'Santorini, Greece',
-        'coordinates': [36.3932, 25.4615],
-        'search_query': 'Santorini Greece'
-    },
-    'ibiza': {
-        'name': 'Ibiza, Spain',
-        'coordinates': [38.9067, 1.4206],
-        'search_query': 'Ibiza Spain'
-    }
-}
-
-# Country codes for Booking.com URLs based on city
-COUNTRY_CODES = {
-    'stockholm': 'sv', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
-    'paris': 'fr', 'lyon': 'fr', 'nice': 'fr',
-    'london': 'en-gb', 'edinburgh': 'en-gb',
-    'amsterdam': 'nl', 'brussels': 'nl',
-    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es',
-    'rome': 'it', 'milano': 'it', 'florence': 'it',
-    'berlin': 'de', 'munich': 'de',
-    'vienna': 'de', 'zurich': 'de',
-    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu',
-    'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
-}
-
-# Room Type Configuration with Junior Suite
-ROOM_TYPE_MAPPING = {
-    'single': {
-        'guests': 1,
-        'description': 'Single Room - Perfect for solo travelers',
-        'keywords': ['single', 'solo', 'individual', 'one person'],
-        'booking_param': 'single'
-    },
-    'double': {
-        'guests': 2,
-        'description': 'Double Room - Ideal for couples',
-        'keywords': ['double', 'twin', 'couple', 'two person', 'standard'],
-        'booking_param': 'double'
-    },
-    'family': {
-        'guests': 4,
-        'description': 'Family Room - Great for families with children',
-        'keywords': ['family', 'quad', 'four person', 'children', 'kids'],
-        'booking_param': 'family'
-    },
-    'junior_suite': {
-        'guests': 2,
-        'description': 'Junior Suite - Spacious room with sitting area',
-        'keywords': ['junior suite', 'junior', 'suite', 'sitting area', 'upgraded'],
-        'booking_param': 'junior_suite'
-    },
-    'suite': {
-        'guests': 3,
-        'description': 'Suite/Apartment - Luxury accommodation with separate living space',
-        'keywords': ['suite', 'apartment', 'luxury', 'separate', 'living room'],
-        'booking_param': 'suite'
-    }
-}
-
-def get_location_id(city_query):
-    """Get Booking.com location ID for a city"""
-    url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
-    
-    querystring = {"query": city_query, "languageCode": "en"}
-    headers = {
-        "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, params=querystring)
-        if response.status_code == 200:
-            data = response.json()
-            if 'data' in data and data['data']:
-                return data['data'][0].get('id')
-    except Exception as e:
-        print(f"Error getting location ID: {e}")
-    
-    return None
-
-def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms, room_type=None):
-    """Search hotels using Booking.com API with room type consideration"""
-    url = "https://booking-com18.p.rapidapi.com/stays/search"
-    
-    querystring = {
-        "locationId": location_id,
-        "checkinDate": checkin,
-        "checkoutDate": checkout,
-        "adults": adults,
-        "rooms": rooms,
-        "currency": "EUR"
-    }
-    
-    # Add room type specific parameters if available
-    if room_type and room_type in ROOM_TYPE_MAPPING:
-        room_config = ROOM_TYPE_MAPPING[room_type]
-        
-        # Adjust search parameters based on room type
-        if room_type == 'family':
-            querystring['children'] = 2  # Assume 2 children for family rooms
-        elif room_type in ['junior_suite', 'suite']:
-            querystring['roomType'] = 'suite'  # Try to get suite-type rooms
-    
-    headers = {
-        "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, params=querystring)
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        print(f"Error searching hotels: {e}")
-    
-    return None
-
-def analyze_room_type(hotel, requested_room_type):
-    """Analyze if hotel matches requested room type based on name and description"""
-    if not requested_room_type or requested_room_type not in ROOM_TYPE_MAPPING:
-        return True, "Standard Room"
-    
-    room_config = ROOM_TYPE_MAPPING[requested_room_type]
-    hotel_name = hotel.get('name', '').lower()
-    hotel_description = hotel.get('description', '').lower()
-    
-    # Check if hotel name/description contains room type keywords
-    for keyword in room_config['keywords']:
-        if keyword.lower() in hotel_name or keyword.lower() in hotel_description:
-            return True, room_config['description']
-    
-    # For Junior Suite, also check for general suite indicators
-    if requested_room_type == 'junior_suite':
-        suite_indicators = ['junior', 'suite', 'upgraded', 'spacious', 'sitting']
-        for indicator in suite_indicators:
-            if indicator in hotel_name:
-                return True, "Junior Suite - " + room_config['description']
-    
-    # Default: assume hotel can accommodate the room type
-    return True, room_config['description']
-
-def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key, room_type=None):
-    """Create hotel name-based booking URL with room type consideration"""
-    
-    # Priority 1: Use direct hotel URL from API if available
-    direct_urls = [
-        hotel.get('url'),
-        hotel.get('link'), 
-        hotel.get('booking_url'),
-        hotel.get('hotelUrl'),
-        hotel.get('deepLink')
-    ]
-    
-    for url in direct_urls:
-        if url and 'booking.com' in str(url):
-            # Add search parameters to direct URL
-            params = f"&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
-            if room_type and room_type in ROOM_TYPE_MAPPING:
-                params += f"&room_type={room_type}"
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 2rem !important;
+            }
+            .search-container {
+                padding: 15px !important;
+            }
+            #map {
+                height: 250px !important;
+            }
+            .hotels-panel {
+                height: 400px !important;
+                padding: 10px !important;
+            }
+            .hotel-card {
+                padding: 10px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>STAYFINDR</h1>
+            <p>Save Time & Money: See Today's Hotel Prices Across Europe</p>
+        </div>
             
-            if '?' in url:
-                return f"{url}{params}"
-            else:
-                return f"{url}?{params[1:]}"  # Remove first &
-    
-    # Priority 2: Create hotel name-based search URL with room type
-    hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
-    hotel_name = hotel.get('name', 'Hotel')
-    
-    if hotel_id and hotel_name:
-        # Get country code for the city
-        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        
-        # Create hotel name-based search URL
-        base_params = {
-            'ss': hotel_name,  # Hotel search string
-            'dest_id': hotel_id,  # Hotel destination ID
-            'dest_type': 'hotel',  # Specify it's a hotel
-            'checkin': checkin,
-            'checkout': checkout,
-            'group_adults': adults,
-            'no_rooms': rooms,
-            'group_children': 0,
-            'search_selected': 'true'
+        <div class="status" id="connectionStatus">
+            🔗 Connecting to STAYFINDR backend...
+        </div>
+
+        <div class="search-container">
+            <form id="searchForm" class="search-form">
+                <div class="form-group">
+                    <label for="city">City</label>
+                    <select id="city">
+                        <option value="stockholm">Stockholm, Sweden</option>
+                        <option value="paris">Paris, France</option>
+                        <option value="london">London, UK</option>
+                        <option value="amsterdam">Amsterdam, Netherlands</option>
+                        <option value="barcelona">Barcelona, Spain</option>
+                        <option value="rome">Rome, Italy</option>
+                        <option value="berlin">Berlin, Germany</option>
+                        <option value="copenhagen">Copenhagen, Denmark</option>
+                        <option value="vienna">Vienna, Austria</option>
+                        <option value="prague">Prague, Czech Republic</option>
+                        <option value="madrid">Madrid, Spain</option>
+                        <option value="milano">Milano, Italy</option>
+                        <option value="zurich">Zürich, Switzerland</option>
+                        <option value="oslo">Oslo, Norway</option>
+                        <option value="helsinki">Helsinki, Finland</option>
+                        <option value="warsaw">Warsaw, Poland</option>
+                        <option value="budapest">Budapest, Hungary</option>
+                        <option value="dublin">Dublin, Ireland</option>
+                        <option value="lisbon">Lisbon, Portugal</option>
+                        <option value="brussels">Brussels, Belgium</option>
+                        <option value="athens">Athens, Greece</option>
+                        <option value="munich">Munich, Germany</option>
+                        <option value="lyon">Lyon, France</option>
+                        <option value="florence">Florence, Italy</option>
+                        <option value="edinburgh">Edinburgh, Scotland</option>
+                        <option value="nice">Nice, France</option>
+                        <option value="palma">Palma, Spain</option>
+                        <option value="santorini">Santorini, Greece</option>
+                        <option value="ibiza">Ibiza, Spain</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="roomType">Room Type</label>
+                    <select id="roomType">
+                        <option value="single">Single Room (1 guest)</option>
+                        <option value="double" selected>Double Room (2 guests)</option>
+                        <option value="family">Family Room (3-4 guests)</option>
+                        <option value="junior_suite">Junior Suite (2 guests)</option>
+                        <option value="suite">Suite/Apartment (2-4 guests)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="checkin">Check-in</label>
+                    <input type="date" id="checkin" required>
+                </div>
+                <div class="form-group">
+                    <label for="checkout">Check-out</label>
+                    <input type="date" id="checkout" required>
+                </div>
+                <div class="form-group">
+                    <label for="guests">Guests</label>
+                    <select id="guests">
+                        <option value="1">1 Guest</option>
+                        <option value="2" selected>2 Guests</option>
+                        <option value="3">3 Guests</option>
+                        <option value="4">4 Guests</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="search-btn" id="searchButton">
+                        🔍 Search Hotels
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="main-content">
+            <div id="map"></div>
+            <div class="hotels-panel">
+                <h3 id="hotelsTitle">Hotels</h3>
+                <div id="hotelsList">
+                    <div class="loading">Select room type and click "Search Hotels" to find real hotels from Booking.com</div>
+                </div>
+                <div id="loadMoreContainer" style="display: none; text-align: center; margin-top: 15px;">
+                    <button id="loadMoreBtn" class="search-btn" style="width: 100%;">
+                        📋 Show More Hotels
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+        let currentMarkers = [];
+        let currentHotels = [];
+        let allHotelsData = [];
+        let currentlyShowing = 5;
+        const BACKEND_URL = 'https://actionly.onrender.com';
+
+        // Room type mapping for smart guest updating
+        const ROOM_TYPE_MAPPING = {
+            'single': { guests: 1, description: 'Perfect for solo travelers' },
+            'double': { guests: 2, description: 'Ideal for couples' },
+            'family': { guests: 4, description: 'Great for families with children' },
+            'junior_suite': { guests: 2, description: 'Spacious room with sitting area' },
+            'suite': { guests: 3, description: 'Luxury accommodation with separate living space' }
+        };
+
+        // Wait for Leaflet to load properly
+        function waitForLeaflet() {
+            return new Promise((resolve) => {
+                function checkLeaflet() {
+                    if (typeof L !== 'undefined') {
+                        console.log('✅ Leaflet loaded successfully');
+                        resolve();
+                    } else {
+                        console.log('⏳ Waiting for Leaflet...');
+                        setTimeout(checkLeaflet, 100);
+                    }
+                }
+                checkLeaflet();
+            });
         }
-        
-        # Add room type specific parameters
-        if room_type and room_type in ROOM_TYPE_MAPPING:
-            room_config = ROOM_TYPE_MAPPING[room_type]
-            if room_type == 'family':
-                base_params['group_children'] = 2
-            elif room_type in ['junior_suite', 'suite']:
-                base_params['room_type'] = 'suite'
-        
-        # Build URL parameters
-        params_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in base_params.items()])
-        
-        return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
-    
-    # Priority 3: Fallback to hotel ID-based URL
-    if hotel_id:
-        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        base_url = f"https://www.booking.com/hotel/{country_code.split('-')[0]}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
-        
-        if room_type and room_type in ROOM_TYPE_MAPPING:
-            base_url += f"&room_type={room_type}"
-        
-        return base_url
-    
-    # Priority 4: Generic search by hotel name in the city
-    hotel_name = hotel.get('name', '').replace(' ', '+')
-    city_name = city_info['name'].replace(' ', '+')
-    country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-    
-    base_url = f"https://www.booking.com/searchresults.{country_code}.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
-    
-    if room_type:
-        base_url += f"&room_type={room_type}"
-    
-    return base_url
 
-def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms, city_key, room_type=None):
-    """Process and format hotel data with room type filtering"""
-    processed_hotels = []
-    
-    for i, hotel in enumerate(hotels_data):
-        # Extract hotel information
-        hotel_name = hotel.get('name', 'Unknown Hotel')
-        
-        # Analyze room type compatibility
-        is_compatible, room_description = analyze_room_type(hotel, room_type)
-        
-        # Skip hotels that clearly don't match (in future versions, we could be more strict)
-        # For now, we include all hotels but mark them with appropriate room descriptions
-        
-        # Get real coordinates if available, otherwise use city center with offset
-        latitude = hotel.get('latitude')
-        longitude = hotel.get('longitude')
-        
-        if latitude and longitude:
-            coordinates = [float(latitude), float(longitude)]
-        else:
-            # Fallback: spread around city center
-            base_lat, base_lng = city_info['coordinates']
-            coordinates = [
-                base_lat + (i * 0.01) - 0.05,
-                base_lng + (i * 0.01) - 0.05
-            ]
-        
-        # Extract pricing information
-        price = 'N/A'
-        if 'priceBreakdown' in hotel:
-            price_info = hotel['priceBreakdown'].get('grossPrice', {})
-            if 'value' in price_info:
-                # Convert to per night if total price
-                total_price = price_info['value']
-                try:
-                    # Estimate per night (assuming booking is for multiple nights)
-                    checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
-                    checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
-                    nights = (checkout_date - checkin_date).days
-                    if nights > 0:
-                        price = int(total_price / nights)
-                    else:
-                        price = total_price
-                except:
-                    price = int(total_price / 7)  # Fallback: assume 7 nights
-        elif 'price' in hotel:
-            price = hotel['price']
-        
-        # Extract rating
-        rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
-        if rating:
-            rating = float(rating) / 2 if rating > 5 else float(rating)  # Normalize to 5-point scale
-        else:
-            rating = 4.0
-        
-        # Extract address
-        address = hotel.get('address', city_info['name'])
-        
-        # Create optimized booking URL with room type
-        booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key, room_type)
-        
-        processed_hotel = {
-            'id': hotel.get('id') or hotel.get('hotel_id') or f"hotel_{i}",
-            'name': hotel_name,
-            'address': address,
-            'coordinates': coordinates,
-            'price': price,
-            'rating': rating,
-            'booking_url': booking_url,
-            'room_type': room_type,
-            'room_description': room_description,
-            'is_room_match': is_compatible
+        // Initialize the application
+        function initializeApp() {
+            console.log('🚀 Initializing STAYFINDR with live backend...');
+            
+            testBackendConnection();
+            initMap();
+            setupEventListeners();
+            setDefaultDates();
+            setupRoomTypeLogic();
+            
+            console.log('✅ STAYFINDR initialized successfully');
         }
-        
-        processed_hotels.append(processed_hotel)
-    
-    return processed_hotels
 
-@app.route('/')
-def home():
-    """API Documentation Page"""
-    return render_template_string('''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🏨 STAYFINDR Backend API</title>
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-            h1 { color: #2c3e50; }
-            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
-            .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
-            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
-            .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
-            .room-types { background: #fff3cd; padding: 15px; margin: 10px 0; border-radius: 8px; }
-        </style>
-    </head>
-    <body>
-        <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend for European hotel search with hotel name-based booking URLs + Room Type Filter</p>
-        
-        <div class="feature">
-            <strong>✅ NEW: Room Type Filter with Junior Suite</strong><br>
-            Now supports: Single, Double, Family, Junior Suite, and Suite/Apartment room types
-        </div>
-        
-        <div class="room-types">
-            <strong>🏨 Available Room Types:</strong><br>
-            • Single Room (1 guest) - Perfect for solo travelers<br>
-            • Double Room (2 guests) - Ideal for couples<br>
-            • Family Room (3-4 guests) - Great for families with children<br>
-            • <strong>Junior Suite (2 guests) - Spacious room with sitting area</strong><br>
-            • Suite/Apartment (2-4 guests) - Luxury accommodation with separate living space
-        </div>
-        
-        <h2>Available endpoints:</h2>
-        <div class="endpoint">
-            <strong>/api/hotels</strong> - Get hotels for a city<br>
-            Parameters: city, checkin, checkout, adults, rooms, <strong>room_type</strong><br>
-            <em>Now with room type filtering and hotel name-based URLs</em>
-        </div>
-        <div class="endpoint">
-            <strong>/api/cities</strong> - List all 29 cities
-        </div>
-        <div class="endpoint">
-            <strong>/test</strong> - Test Stockholm hotels with default double room
-        </div>
-        
-        <h2>Cities supported:</h2>
-        <div class="cities">
-            {% for city in cities %}
-            <div class="city">{{ city }}</div>
-            {% endfor %}
-        </div>
-    </body>
-    </html>
-    ''', cities=list(CITIES.keys()))
+        async function testBackendConnection() {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/cities`);
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('connectionStatus').innerHTML = `✅ Connected to STAYFINDR backend - ${data.total} cities available!`;
+                    document.getElementById('connectionStatus').className = 'status success-indicator';
+                } else {
+                    throw new Error('Backend not responding');
+                }
+            } catch (error) {
+                document.getElementById('connectionStatus').innerHTML = '❌ Backend offline - Using demo data';
+                document.getElementById('connectionStatus').className = 'status error';
+            }
+        }
 
-@app.route('/api/cities')
-def get_cities():
-    """Get all supported cities"""
-    return jsonify({
-        'cities': CITIES,
-        'total': len(CITIES)
-    })
+        function initMap() {
+            try {
+                map = L.map('map').setView([59.3293, 18.0686], 6);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+                console.log('🗺️ Map initialized successfully');
+            } catch (error) {
+                console.error('Map initialization failed:', error);
+            }
+        }
 
-@app.route('/api/room-types')
-def get_room_types():
-    """Get all available room types"""
-    return jsonify({
-        'room_types': ROOM_TYPE_MAPPING,
-        'total': len(ROOM_TYPE_MAPPING)
-    })
+        function setupEventListeners() {
+            const searchForm = document.getElementById('searchForm');
+            if (searchForm) {
+                searchForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    searchHotels();
+                });
+                console.log('📋 Form event listeners setup');
+            }
 
-@app.route('/api/hotels')
-def get_hotels():
-    """Get hotels for a specific city with room type filtering"""
-    city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', '2025-07-14')
-    checkout = request.args.get('checkout', '2025-07-21')
-    adults = request.args.get('adults', '2')
-    rooms = request.args.get('rooms', '1')
-    room_type = request.args.get('room_type', 'double')  # NEW: Room type parameter
-    
-    if city not in CITIES:
-        return jsonify({'error': f'City {city} not supported'}), 400
-    
-    if room_type and room_type not in ROOM_TYPE_MAPPING:
-        return jsonify({'error': f'Room type {room_type} not supported. Available: {list(ROOM_TYPE_MAPPING.keys())}'}), 400
-    
-    city_info = CITIES[city]
-    
-    # Get location ID for the city
-    location_id = get_location_id(city_info['search_query'])
-    
-    if not location_id:
-        return jsonify({'error': f'Could not find location ID for {city}'}), 404
-    
-    # Search hotels with room type consideration
-    hotels_data = search_hotels_booking_api(location_id, checkin, checkout, adults, rooms, room_type)
-    
-    if not hotels_data or 'data' not in hotels_data:
-        return jsonify({'error': 'No hotels found'}), 404
-    
-    # Process hotel data with room type filtering - limit to top 50
-    processed_hotels = process_hotel_data(
-        hotels_data['data'][:50], 
-        city_info, 
-        checkin, 
-        checkout, 
-        adults, 
-        rooms,
-        city,  # Pass city key for country code lookup
-        room_type  # NEW: Pass room type for filtering
-    )
-    
-    # Get room type description
-    room_description = ROOM_TYPE_MAPPING.get(room_type, {}).get('description', 'Standard Room')
-    
-    return jsonify({
-        'city': city_info['name'],
-        'hotels': processed_hotels,
-        'total_found': len(processed_hotels),
-        'search_params': {
-            'checkin': checkin,
-            'checkout': checkout, 
-            'adults': adults,
-            'rooms': rooms,
-            'room_type': room_type,
-            'room_description': room_description
-        },
-        'booking_optimization': 'enabled',
-        'localization': 'enabled',
-        'url_type': 'hotel_name_based',
-        'room_filter': 'enabled'
-    })
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            if (loadMoreBtn) {
+                loadMoreBtn.addEventListener('click', function() {
+                    showMoreHotels();
+                });
+            }
+        }
 
-@app.route('/test')
-def test_stockholm():
-    """Test endpoint with Stockholm hotels - default double room"""
-    return get_hotels()
+        function setupRoomTypeLogic() {
+            const roomTypeSelect = document.getElementById('roomType');
+            const guestsSelect = document.getElementById('guests');
 
-if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend...")
-    print("🏨 Supporting 29 European cities")
-    print("🌍 Hotel name-based booking URLs")
-    print("🛏️ NEW: Room Type Filter with Junior Suite")
-    print("🔗 Frontend will connect to: http://localhost:5000")
-    print("📋 Test API: http://localhost:5000/test")
-    print("✅ Complete hotel search with room type filtering")
-    
-    # Use PORT environment variable for deployment (Render, Heroku, etc.)
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+            // Smart guest updating when room type changes
+            roomTypeSelect.addEventListener('change', function() {
+                const roomType = this.value;
+                const mapping = ROOM_TYPE_MAPPING[roomType];
+                
+                if (mapping) {
+                    guestsSelect.value = mapping.guests;
+                    
+                    // Update status with room description
+                    const statusEl = document.getElementById('connectionStatus');
+                    statusEl.innerHTML = `🏨 ${mapping.description} - Ready to search!`;
+                    statusEl.className = 'status success-indicator';
+                }
+            });
+        }
+
+        function setDefaultDates() {
+            const today = new Date();
+            const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+            
+            document.getElementById('checkin').value = today.toISOString().split('T')[0];
+            document.getElementById('checkout').value = tomorrow.toISOString().split('T')[0];
+        }
+
+        async function searchHotels() {
+            const city = document.getElementById('city').value;
+            const roomType = document.getElementById('roomType').value;
+            const checkin = document.getElementById('checkin').value;
+            const checkout = document.getElementById('checkout').value;
+            const guests = document.getElementById('guests').value;
+
+            console.log(`🔍 Searching hotels: ${city}, ${roomType}, ${checkin} to ${checkout}, ${guests} guests`);
+
+            const searchButton = document.getElementById('searchButton');
+            const hotelsList = document.getElementById('hotelsList');
+            const hotelsTitle = document.getElementById('hotelsTitle');
+
+            searchButton.disabled = true;
+            searchButton.innerHTML = '⏳ Searching...';
+            hotelsList.innerHTML = '<div class="loading">🔍 Searching real hotels from Booking.com...</div>';
+            hotelsTitle.innerHTML = `${ROOM_TYPE_MAPPING[roomType]?.description || 'Hotels'} in ${city}`;
+
+            try {
+                // Include room type in API call
+                const response = await fetch(`${BACKEND_URL}/api/hotels?city=${city}&checkin=${checkin}&checkout=${checkout}&adults=${guests}&rooms=1&room_type=${roomType}`);
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                if (data.hotels && data.hotels.length > 0) {
+                    allHotelsData = data.hotels;
+                    currentlyShowing = 5;
+                    
+                    displayHotels(data.hotels.slice(0, 5), data.city, roomType);
+                    updateMap(data.hotels.slice(0, 5));
+                    
+                    const loadMoreContainer = document.getElementById('loadMoreContainer');
+                    if (data.hotels.length > 5) {
+                        loadMoreContainer.style.display = 'block';
+                        updateLoadMoreButton();
+                    } else {
+                        loadMoreContainer.style.display = 'none';
+                    }
+                    
+                    document.getElementById('connectionStatus').innerHTML = 
+                        `✅ Found ${data.total_found} ${ROOM_TYPE_MAPPING[roomType]?.description.toLowerCase() || 'hotels'} in ${data.city} from Booking.com! (Showing ${Math.min(5, data.hotels.length)})`;
+                    document.getElementById('connectionStatus').className = 'status success-indicator';
+                } else {
+                    hotelsList.innerHTML = '<div class="error">No hotels found for this room type and dates.</div>';
+                    document.getElementById('loadMoreContainer').style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error('Search error:', error);
+                hotelsList.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                
+                document.getElementById('connectionStatus').innerHTML = '❌ Search failed - Check backend connection';
+                document.getElementById('connectionStatus').className = 'status error';
+            }
+
+            searchButton.disabled = false;
+            searchButton.innerHTML = '🔍 Search Hotels';
+        }
+
+        function showMoreHotels() {
+            const nextBatch = Math.min(currentlyShowing + 5, allHotelsData.length);
+            const hotelsToShow = allHotelsData.slice(0, nextBatch);
+            
+            currentlyShowing = nextBatch;
+            
+            const roomType = document.getElementById('roomType').value;
+            displayHotels(hotelsToShow, '', roomType);
+            updateMap(hotelsToShow);
+            updateLoadMoreButton();
+            
+            document.getElementById('connectionStatus').innerHTML = 
+                `✅ Showing ${currentlyShowing} of ${allHotelsData.length} hotels`;
+        }
+
+        function updateLoadMoreButton() {
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            const loadMoreContainer = document.getElementById('loadMoreContainer');
+            
+            if (currentlyShowing >= allHotelsData.length) {
+                loadMoreContainer.style.display = 'none';
+            } else {
+                const remaining = allHotelsData.length - currentlyShowing;
+                loadMoreBtn.innerHTML = `📋 Show ${Math.min(5, remaining)} More Hotels (${remaining} remaining)`;
+            }
+        }
+
+        function displayHotels(hotels, cityName, roomType) {
+            currentHotels = hotels;
+            const hotelsList = document.getElementById('hotelsList');
+            const roomDescription = ROOM_TYPE_MAPPING[roomType]?.description || '';
+
+            let html = '';
+            hotels.forEach((hotel, index) => {
+                const priceDisplay = hotel.price !== 'N/A' ? `€${hotel.price}/night` : 'Price on request';
+                const stars = '⭐'.repeat(Math.floor(hotel.rating));
+
+                html += `
+                    <div class="hotel-card" data-hotel-id="${hotel.id}" 
+                         onmouseover="highlightMarker(${index})" 
+                         onmouseout="unhighlightMarker(${index})">
+                        <div class="hotel-name">${hotel.name}</div>
+                        <div class="hotel-details">📍 ${hotel.address}</div>
+                        <div class="hotel-details" style="color: #3498db; font-weight: 500;">
+                            🏨 ${roomDescription}
+                        </div>
+                        <div class="price-info">
+                            <span class="price">${priceDisplay}</span>
+                            <span class="rating">${stars} ${hotel.rating}/5</span>
+                        </div>
+                        <div class="hotel-actions">
+                            <a href="${hotel.booking_url}" target="_blank" class="action-btn book-btn">
+                                Book on Booking.com
+                            </a>
+                        </div>
+                    </div>
+                `;
+            });
+
+            hotelsList.innerHTML = html;
+        }
+
+        function updateMap(hotels) {
+            currentMarkers.forEach(marker => map.removeLayer(marker));
+            currentMarkers = [];
+
+            if (hotels.length > 0) {
+                const center = hotels[0].coordinates;
+                map.setView(center, 12);
+
+                hotels.forEach((hotel, index) => {
+                    const marker = L.marker(hotel.coordinates)
+                        .addTo(map)
+                        .bindPopup(`
+                            <b>${hotel.name}</b><br>
+                            ${hotel.price !== 'N/A' ? `€${hotel.price}/night` : 'Price on request'}<br>
+                            ⭐ ${hotel.rating}/5
+                        `);
+
+                    marker.on('click', () => highlightHotelCard(index));
+                    currentMarkers.push(marker);
+                });
+            }
+        }
+
+        function highlightMarker(index) {
+            if (currentMarkers[index]) {
+                currentMarkers[index].openPopup();
+            }
+        }
+
+        function unhighlightMarker(index) {
+            if (currentMarkers[index]) {
+                currentMarkers[index].closePopup();
+            }
+        }
+
+        function highlightHotelCard(index) {
+            document.querySelectorAll('.hotel-card').forEach(card => 
+                card.classList.remove('highlighted'));
+
+            const targetCard = document.querySelector(`[data-hotel-id="${currentHotels[index].id}"]`);
+            if (targetCard) {
+                targetCard.classList.add('highlighted');
+                targetCard.scrollIntoView({behavior: 'smooth', block: 'center'});
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('📄 Page loaded, waiting for Leaflet...');
+            await waitForLeaflet();
+            initializeApp();
+        });
+    </script>
+</body>
+</html>
