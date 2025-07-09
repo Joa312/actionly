@@ -1,6 +1,6 @@
 # STAYFINDR BACKEND - European Hotel Search Engine
 # Flask backend with RapidAPI Booking.com integration
-# FIXED: Direct hotel booking URLs
+# FIXED: Direct hotel booking URLs with dynamic country codes
 
 import os
 from flask import Flask, request, jsonify, render_template_string
@@ -166,6 +166,20 @@ CITIES = {
     }
 }
 
+# Country codes for Booking.com URLs based on city
+COUNTRY_CODES = {
+    'stockholm': 'se', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
+    'paris': 'fr', 'lyon': 'fr', 'nice': 'fr',
+    'london': 'gb', 'edinburgh': 'gb',
+    'amsterdam': 'nl', 'brussels': 'be',
+    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es',
+    'rome': 'it', 'milano': 'it', 'florence': 'it',
+    'berlin': 'de', 'munich': 'de',
+    'vienna': 'at', 'zurich': 'ch',
+    'prague': 'cz', 'warsaw': 'pl', 'budapest': 'hu',
+    'dublin': 'ie', 'lisbon': 'pt', 'athens': 'gr', 'santorini': 'gr'
+}
+
 def get_location_id(city_query):
     """Get Booking.com location ID for a city"""
     url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
@@ -214,8 +228,8 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     
     return None
 
-def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms):
-    """Create the best possible booking URL for the hotel"""
+def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key):
+    """Create the best possible booking URL for the hotel with correct country"""
     
     # Priority 1: Use direct hotel URL from API if available
     direct_urls = [
@@ -234,17 +248,20 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms):
             else:
                 return f"{url}?checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
     
-    # Priority 2: Use hotel ID if available
+    # Priority 2: Use hotel ID if available with correct country code
     hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
     if hotel_id:
-       return f"https://www.booking.com/hotel/se/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+        # Get country code for the city
+        country_code = COUNTRY_CODES.get(city_key, 'com')  # Default to .com if not found
+        return f"https://www.booking.com/hotel/{country_code}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
     
     # Priority 3: Search by hotel name in the city
     hotel_name = hotel.get('name', '').replace(' ', '+')
     city_name = city_info['name'].replace(' ', '+')
+    country_code = COUNTRY_CODES.get(city_key, 'com')
     return f"https://www.booking.com/searchresults.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
 
-def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms):
+def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms, city_key):
     """Process and format hotel data with proper booking URLs"""
     processed_hotels = []
     
@@ -298,8 +315,8 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms)
         # Extract address
         address = hotel.get('address', city_info['name'])
         
-        # Create optimized booking URL
-        booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms)
+        # Create optimized booking URL with correct country
+        booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key)
         
         processed_hotel = {
             'id': hotel.get('id') or hotel.get('hotel_id') or f"hotel_{i}",
@@ -334,18 +351,18 @@ def home():
     </head>
     <body>
         <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend for European hotel search with optimized booking URLs</p>
+        <p>Flask backend for European hotel search with localized booking URLs</p>
         
         <div class="feature">
-            <strong>✅ NEW: Direct Hotel Booking URLs</strong><br>
-            CTA buttons now link directly to specific hotels on Booking.com
+            <strong>✅ NEW: Country-Specific Booking URLs</strong><br>
+            CTA buttons now link to correct local Booking.com sites (ES for Spain, FR for France, etc.)
         </div>
         
         <h2>Available endpoints:</h2>
         <div class="endpoint">
             <strong>/api/hotels</strong> - Get hotels for a city<br>
             Parameters: city, checkin, checkout, adults, rooms<br>
-            <em>Now with optimized booking URLs</em>
+            <em>Now with localized booking URLs</em>
         </div>
         <div class="endpoint">
             <strong>/api/cities</strong> - List all 29 cities
@@ -374,7 +391,7 @@ def get_cities():
 
 @app.route('/api/hotels')
 def get_hotels():
-    """Get hotels for a specific city with optimized booking URLs"""
+    """Get hotels for a specific city with localized booking URLs"""
     city = request.args.get('city', 'stockholm')
     checkin = request.args.get('checkin', '2025-07-14')
     checkout = request.args.get('checkout', '2025-07-21')
@@ -398,16 +415,16 @@ def get_hotels():
     if not hotels_data or 'data' not in hotels_data:
         return jsonify({'error': 'No hotels found'}), 404
     
-
-# Process hotel data with optimized booking URLs - limit to top 50
-processed_hotels = process_hotel_data(
-    hotels_data['data'][:50], 
-    city_info, 
-    checkin, 
-    checkout, 
-    adults, 
-    rooms
-)
+    # Process hotel data with localized booking URLs - limit to top 50
+    processed_hotels = process_hotel_data(
+        hotels_data['data'][:50], 
+        city_info, 
+        checkin, 
+        checkout, 
+        adults, 
+        rooms,
+        city  # Pass city key for country code lookup
+    )
     
     return jsonify({
         'city': city_info['name'],
@@ -419,7 +436,8 @@ processed_hotels = process_hotel_data(
             'adults': adults,
             'rooms': rooms
         },
-        'booking_optimization': 'enabled'
+        'booking_optimization': 'enabled',
+        'localization': 'enabled'
     })
 
 @app.route('/test')
@@ -430,9 +448,10 @@ def test_stockholm():
 if __name__ == '__main__':
     print("🚀 Starting STAYFINDR Backend...")
     print("🏨 Supporting 29 European cities")
+    print("🌍 NEW: Localized booking URLs for each country")
     print("🔗 Frontend will connect to: http://localhost:5000")
     print("📋 Test API: http://localhost:5000/test")
-    print("✅ NEW: Optimized booking URLs enabled")
+    print("✅ Country-specific Booking.com integration enabled")
     
     # Use PORT environment variable for deployment (Render, Heroku, etc.)
     port = int(os.environ.get('PORT', 5000))
