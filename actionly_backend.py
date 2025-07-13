@@ -3,13 +3,12 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
     if not hotels_data or 'data' not in hotels_data:
         return processed_hotels
 
-    # Extrahera properties-svaret
     data = hotels_data['data']
     properties = []
     try:
-        if isinstance(data, dict) and 'propertySearch' in data and data['propertySearch']:
+        if isinstance(data, dict) and data.get('propertySearch'):
             properties = data['propertySearch'].get('properties', [])
-        elif isinstance(data, dict) and 'properties' in data:
+        elif isinstance(data, dict) and data.get('properties'):
             properties = data['properties']
         elif isinstance(data, list):
             properties = data
@@ -21,7 +20,6 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         if not hotel or not isinstance(hotel, dict):
             continue
 
-        # Namn
         hotel_name = hotel.get('name') or f"Hotel {i+1}"
 
         # Koordinater
@@ -53,22 +51,25 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         # Rating
         rating = 4.0
         try:
-            reviews = hotel.get('reviews') or hotel.get('guestReviews') or {}
-            rating = float(reviews.get('score') or reviews.get('rating') or rating)
+            rev = hotel.get('reviews') or hotel.get('guestReviews') or {}
+            rating = float(rev.get('score') or rev.get('rating') or rating)
         except:
             rating = 4.0
 
         # URL
         property_id = hotel.get('id') or hotel.get('propertyId') or f"{i}"
-        hotels_url = (f"https://hotels.com/h{property_id}.Hotel-Information?"
-                      f"checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0")
+        hotels_url = (
+            f"https://hotels.com/h{property_id}.Hotel-Information?"
+            f"checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
+        )
 
         # 🏷️ Adress – säkert hanterad med fallback
-        address = (hotel.get('neighborhood') or {}).get('name') \
-               or (hotel.get('address') or {}).get('streetAddress') \
-               or city_info['name']  # Fallback om inget ovan finns
+        address = (
+            (hotel.get('neighborhood') or {}).get('name') or
+            (hotel.get('address') or {}).get('streetAddress') or
+            city_info['name']
+        )
 
-        # Sätt ihop hotelldata
         processed_hotels.append({
             'id': f"hotels_{property_id}",
             'name': hotel_name,
