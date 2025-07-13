@@ -5,11 +5,14 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
 
     data = hotels_data['data']
     properties = []
+
     try:
-        if isinstance(data, dict) and data.get('propertySearch'):
-            properties = data['propertySearch'].get('properties', [])
-        elif isinstance(data, dict) and data.get('properties'):
-            properties = data['properties']
+        if isinstance(data, dict):
+            properties = (
+                data.get('propertySearch', {}).get('properties') or
+                data.get('properties') or
+                []
+            )
         elif isinstance(data, list):
             properties = data
     except Exception as e:
@@ -20,56 +23,62 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         if not hotel or not isinstance(hotel, dict):
             continue
 
+        # 🏨 Hotellnamn
         hotel_name = hotel.get('name') or f"Hotel {i+1}"
 
-        # Koordinater
+        # 🗺️ Koordinater
         coordinates = None
         try:
-            mm = hotel.get('mapMarker') or {}
-            ll = mm.get('latLong') or {}
-            coordinates = [float(ll.get('lat') or ll.get('latitude')),
-                           float(ll.get('lon') or ll.get('longitude'))]
+            mm = hotel.get('mapMarker', {})
+            ll = mm.get('latLong', {})
+            lat = float(ll.get('lat') or ll.get('latitude', 0))
+            lon = float(ll.get('lon') or ll.get('longitude', 0))
+            coordinates = [lat, lon]
         except:
             pass
-        if not coordinates:
-            coord = hotel.get('coordinate') or {}
-            coordinates = [float(coord.get('lat') or coord.get('latitude', city_info['coordinates'][0])),
-                           float(coord.get('lon') or coord.get('longitude', city_info['coordinates'][1]))]
-        if not coordinates:
-            # fallback till stadens koordinater
-            base_lat, base_lng = city_info['coordinates']
-            coordinates = [base_lat, base_lng]
 
-        # Pris
+        if not coordinates or coordinates == [0, 0]:
+            coord = hotel.get('coordinate', {})
+            lat = float(coord.get('lat') or coord.get('latitude', city_info['coordinates'][0]))
+            lon = float(coord.get('lon') or coord.get('longitude', city_info['coordinates'][1]))
+            coordinates = [lat, lon]
+
+        if not coordinates or coordinates == [0, 0]:
+            coordinates = city_info['coordinates']
+
+        # 💰 Pris
         price = 'N/A'
         try:
-            price_obj = hotel.get('price') or {}
-            lead = price_obj.get('lead') or {}
+            price_obj = hotel.get('price', {})
+            lead = price_obj.get('lead', {})
             price = int(lead.get('amount', price))
         except:
-            price = 'N/A'
+            pass
 
-        # Rating
+        # ⭐ Betyg
         rating = 4.0
         try:
-            rev = hotel.get('reviews') or hotel.get('guestReviews') or {}
-            rating = float(rev.get('score') or rev.get('rating') or rating)
+            reviews = hotel.get('reviews') or hotel.get('guestReviews') or {}
+            rating = float(reviews.get('score') or reviews.get('rating') or rating)
         except:
-            rating = 4.0
+            pass
 
-        # URL
+        # 🔗 URL till bokning
         property_id = hotel.get('id') or hotel.get('propertyId') or f"{i}"
         hotels_url = (
             f"https://hotels.com/h{property_id}.Hotel-Information?"
             f"checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
         )
 
-        # 🏷️ Adress – säkert hanterad med fallback
-        address = (
-            (hotel.get('neighborhood') or {}).get('name') or
-            (hotel.get('address') or {}).get('streetAddress') or
-            city_info['name']
-        )
+        # 🏷️ Adress med robust fallback
+        try:
+            neighborhood = hotel.get('neighborhood')
+            if isinstance(neighborhood, dict):
+                address = neighborhood.get('name', city_info['name'])
+            else:
+                address = (hotel.get('address', {}).get('streetAddress') or city_info['name'])
+        except:
+            address = city_info['name']
 
         processed_hotels.append({
             'id': f"hotels_{property_id}",
