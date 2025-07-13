@@ -364,23 +364,53 @@ def process_booking_hotels(hotels_data, city_info, checkin, checkout, adults, ro
             'source': 'booking'
         }
         
-        processed_hotels.append(processed_hotel)
+            processed_hotels.append(processed_hotel)
+            
+        except Exception as e:
+            print(f"Error processing Hotels.com hotel {i}: {e}")
+            continue
     
+    print(f"Successfully processed {len(processed_hotels)} Hotels.com hotels")
     return processed_hotels
 
 def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults, rooms):
-    """Process Hotels.com hotel data (v2 API format)"""
+    """Process Hotels.com hotel data (v2 API format) with comprehensive error handling"""
     processed_hotels = []
     
     if not hotels_data or 'data' not in hotels_data:
+        print("No Hotels.com data or missing 'data' field")
         return processed_hotels
     
-    # v2 API structure
-    properties = hotels_data['data'].get('propertySearch', {}).get('properties', [])
+    # v2 API structure - handle various possible structures
+    properties = []
+    try:
+        data = hotels_data['data']
+        if 'propertySearch' in data and data['propertySearch']:
+            if 'properties' in data['propertySearch']:
+                properties = data['propertySearch']['properties']
+        elif 'properties' in data:
+            properties = data['properties']
+        elif isinstance(data, list):
+            properties = data
+    except Exception as e:
+        print(f"Error accessing Hotels.com properties: {e}")
+        return processed_hotels
+    
+    if not properties:
+        print("No properties found in Hotels.com response")
+        return processed_hotels
+    
+    print(f"Processing {len(properties)} Hotels.com properties")
     
     for i, hotel in enumerate(properties[:25]):  # Limit to 25
-        # Extract hotel information
-        hotel_name = hotel.get('name', 'Unknown Hotel')
+        try:
+            if not hotel or not isinstance(hotel, dict):
+                continue
+                
+            # Extract hotel information safely
+            hotel_name = hotel.get('name', f'Hotel {i+1}')
+            if not hotel_name or hotel_name.strip() == '':
+                hotel_name = f'Hotel {i+1}'
         
         # Get coordinates - handle multiple possible structures
         coordinates = None
@@ -481,7 +511,35 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         processed_hotel = {
             'id': f"hotels_{property_id}",
             'name': hotel_name,
-            'address': hotel.get('neighborhood', {}).get('name', city_info['name']),
+        # Extract address safely - handle multiple possible structures
+        address = city_info['name']  # Default fallback
+        try:
+            # Try different address structures
+            if 'neighborhood' in hotel and hotel['neighborhood']:
+                neighborhood = hotel['neighborhood']
+                if isinstance(neighborhood, dict) and 'name' in neighborhood:
+                    address = neighborhood['name']
+                elif isinstance(neighborhood, str):
+                    address = neighborhood
+            elif 'address' in hotel and hotel['address']:
+                addr_obj = hotel['address']
+                if isinstance(addr_obj, dict):
+                    # Try various address fields
+                    address = (addr_obj.get('streetAddress') or 
+                             addr_obj.get('locality') or 
+                             addr_obj.get('region') or 
+                             city_info['name'])
+                elif isinstance(addr_obj, str):
+                    address = addr_obj
+            elif 'location' in hotel and hotel['location']:
+                location = hotel['location']
+                if isinstance(location, dict):
+                    address = (location.get('address') or 
+                             location.get('name') or 
+                             city_info['name'])
+        except (AttributeError, TypeError) as e:
+            print(f"Address parsing error for {hotel_name}: {e}")
+            address = city_info['name']
             'coordinates': coordinates,
             'price': price,
             'rating': rating,
