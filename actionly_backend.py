@@ -36,6 +36,7 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
             coordinates = [float(coord.get('lat') or coord.get('latitude', city_info['coordinates'][0])),
                            float(coord.get('lon') or coord.get('longitude', city_info['coordinates'][1]))]
         if not coordinates:
+            # fallback till stadens koordinater
             base_lat, base_lng = city_info['coordinates']
             coordinates = [base_lat, base_lng]
 
