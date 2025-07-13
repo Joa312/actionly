@@ -382,43 +382,101 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         # Extract hotel information
         hotel_name = hotel.get('name', 'Unknown Hotel')
         
-        # Get coordinates
+        # Get coordinates - handle multiple possible structures
+        coordinates = None
         map_marker = hotel.get('mapMarker', {})
+        
+        # Try different coordinate structures
         if 'latLong' in map_marker:
             lat_long = map_marker['latLong']
-            coordinates = [float(lat_long['lat']), float(lat_long['lon'])]
-        else:
+            if isinstance(lat_long, dict):
+                if 'lat' in lat_long and 'lon' in lat_long:
+                    coordinates = [float(lat_long['lat']), float(lat_long['lon'])]
+                elif 'latitude' in lat_long and 'longitude' in lat_long:
+                    coordinates = [float(lat_long['latitude']), float(lat_long['longitude'])]
+        
+        # Fallback: Try direct coordinates in hotel object
+        if not coordinates:
+            if 'coordinate' in hotel:
+                coord = hotel['coordinate']
+                if 'lat' in coord and 'lon' in coord:
+                    coordinates = [float(coord['lat']), float(coord['lon'])]
+                elif 'latitude' in coord and 'longitude' in coord:
+                    coordinates = [float(coord['latitude']), float(coord['longitude'])]
+        
+        # Final fallback: Use city center with offset
+        if not coordinates:
             base_lat, base_lng = city_info['coordinates']
             coordinates = [
                 base_lat + (i * 0.01) - 0.05,
                 base_lng + (i * 0.01) - 0.05
             ]
         
-        # Extract pricing from price object
+        # Extract pricing - handle multiple price structures safely
         price = 'N/A'
-        price_obj = hotel.get('price', {})
-        if 'lead' in price_obj:
-            price_info = price_obj['lead']
-            if 'amount' in price_info:
-                price = int(price_info['amount'])
-        elif 'displayMessages' in price_obj:
-            # Try to extract price from display messages
-            for msg in price_obj['displayMessages']:
-                if 'lineItems' in msg:
-                    for item in msg['lineItems']:
-                        if 'price' in item and 'amount' in item['price']:
-                            price = int(item['price']['amount'])
+        try:
+            price_obj = hotel.get('price', {})
+            
+            # Try lead price first
+            if 'lead' in price_obj and price_obj['lead']:
+                price_info = price_obj['lead']
+                if 'amount' in price_info:
+                    price = int(price_info['amount'])
+            
+            # Try displayMessages if lead price not found
+            elif 'displayMessages' in price_obj:
+                for msg in price_obj['displayMessages']:
+                    if 'lineItems' in msg:
+                        for item in msg['lineItems']:
+                            if 'price' in item and 'amount' in item['price']:
+                                price = int(item['price']['amount'])
+                                break
+                        if price != 'N/A':
                             break
+            
+            # Try strikeOut price if available
+            elif 'strikeOut' in price_obj and price_obj['strikeOut']:
+                strike_info = price_obj['strikeOut']
+                if 'amount' in strike_info:
+                    price = int(strike_info['amount'])
+            
+            # Try any nested price structure
+            elif isinstance(price_obj, dict):
+                for key, value in price_obj.items():
+                    if isinstance(value, dict) and 'amount' in value:
+                        price = int(value['amount'])
+                        break
         
-        # Extract rating
+        except (ValueError, TypeError, KeyError) as e:
+            print(f"Price parsing error for {hotel_name}: {e}")
+            price = 'N/A'
+        
+        # Extract rating safely
         rating = 4.0
-        reviews = hotel.get('reviews', {})
-        if 'score' in reviews:
-            rating = float(reviews['score'])
+        try:
+            reviews = hotel.get('reviews', {})
+            if 'score' in reviews and reviews['score']:
+                rating = float(reviews['score'])
+            elif 'rating' in reviews and reviews['rating']:
+                rating = float(reviews['rating'])
+            # Try alternative rating locations
+            elif 'guestReviews' in hotel:
+                guest_reviews = hotel['guestReviews']
+                if 'rating' in guest_reviews:
+                    rating = float(guest_reviews['rating'])
+        except (ValueError, TypeError) as e:
+            print(f"Rating parsing error for {hotel_name}: {e}")
+            rating = 4.0
         
-        # Create Hotels.com URL
-        property_id = hotel.get('id', '')
-        hotels_url = f"https://hotels.com/h{property_id}.Hotel-Information?checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
+        # Create Hotels.com URL safely
+        try:
+            property_id = hotel.get('id', hotel.get('propertyId', f'hotel_{i}'))
+            hotels_url = f"https://hotels.com/h{property_id}.Hotel-Information?checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
+        except Exception as e:
+            print(f"URL creation error for {hotel_name}: {e}")
+            # Fallback URL
+            hotel_name_safe = hotel_name.replace(' ', '+')
+            hotels_url = f"https://hotels.com/search.do?q-destination={hotel_name_safe}&q-check-in={checkin}&q-check-out={checkout}"
         
         processed_hotel = {
             'id': f"hotels_{property_id}",
