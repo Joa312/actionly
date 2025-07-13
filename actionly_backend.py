@@ -3,7 +3,7 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
     if not hotels_data or 'data' not in hotels_data:
         return processed_hotels
 
-    # Hämta properties
+    # Extrahera properties-svaret
     data = hotels_data['data']
     properties = []
     try:
@@ -27,20 +27,16 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         # Koordinater
         coordinates = None
         try:
-            map_marker = hotel.get('mapMarker', {}) or {}
-            latLong = map_marker.get('latLong') or {}
-            coordinates = [
-                float(latLong.get('lat') or latLong.get('latitude')),
-                float(latLong.get('lon') or latLong.get('longitude'))
-            ]
+            mm = hotel.get('mapMarker') or {}
+            ll = mm.get('latLong') or {}
+            coordinates = [float(ll.get('lat') or ll.get('latitude')),
+                           float(ll.get('lon') or ll.get('longitude'))]
         except:
             pass
         if not coordinates:
             coord = hotel.get('coordinate') or {}
-            coordinates = [
-                float(coord.get('lat') or coord.get('latitude', city_info['coordinates'][0])),
-                float(coord.get('lon') or coord.get('longitude', city_info['coordinates'][1]))
-            ]
+            coordinates = [float(coord.get('lat') or coord.get('latitude', city_info['coordinates'][0])),
+                           float(coord.get('lon') or coord.get('longitude', city_info['coordinates'][1]))]
         if not coordinates:
             base_lat, base_lng = city_info['coordinates']
             coordinates = [base_lat, base_lng]
@@ -50,7 +46,7 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         try:
             price_obj = hotel.get('price') or {}
             lead = price_obj.get('lead') or {}
-            price = int(lead.get('amount') or price)
+            price = int(lead.get('amount', price))
         except:
             price = 'N/A'
 
@@ -67,27 +63,10 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         hotels_url = (f"https://hotels.com/h{property_id}.Hotel-Information?"
                       f"checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0")
 
-        # Adress – undvik NoneType
-        address = city_info['name']
-        try:
-            neighborhood = hotel.get('neighborhood')
-            if isinstance(neighborhood, dict) and neighborhood.get('name'):
-                address = neighborhood['name']
-            else:
-                addr_obj = hotel.get('address')
-                if isinstance(addr_obj, dict):
-                    address = (addr_obj.get('streetAddress')
-                               or addr_obj.get('locality')
-                               or addr_obj.get('region')
-                               or address)
-                elif isinstance(addr_obj, str) and addr_obj:
-                    address = addr_obj
-                else:
-                    location = hotel.get('location') or {}
-                    if isinstance(location, dict):
-                        address = location.get('address') or location.get('name') or address
-        except Exception as e:
-            print(f"Address parsing error for {hotel_name}: {e}")
+        # 🏷️ Adress – säkert hanterad med fallback
+        address = (hotel.get('neighborhood') or {}).get('name') \
+               or (hotel.get('address') or {}).get('streetAddress') \
+               or city_info['name']  # Fallback om inget ovan finns
 
         # Sätt ihop hotelldata
         processed_hotels.append({
