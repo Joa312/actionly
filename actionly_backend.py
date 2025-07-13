@@ -194,20 +194,13 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
 
 # ==================== HOTELS.COM API FUNCTIONS (NEW!) ====================
 
-def search_hotels_hotels_api(destination_id, checkin, checkout, adults, rooms):
-    """Search hotels using Hotels.com API"""
-    url = "https://hotels4.p.rapidapi.com/properties/list"
+def get_hotels_destination_id(city_name):
+    """Get Hotels.com destination ID using v3 search"""
+    url = "https://hotels4.p.rapidapi.com/locations/v3/search"
     
     querystring = {
-        "destinationId": destination_id,
-        "pageNumber": "1",
-        "pageSize": "25",
-        "checkIn": checkin,
-        "checkOut": checkout,
-        "adults1": adults,
-        "sortOrder": "PRICE",
-        "locale": "en_US",
-        "currency": "EUR"
+        "q": city_name,
+        "locale": "en_US"
     }
     
     headers = {
@@ -217,6 +210,59 @@ def search_hotels_hotels_api(destination_id, checkin, checkout, adults, rooms):
     
     try:
         response = requests.get(url, headers=headers, params=querystring)
+        if response.status_code == 200:
+            data = response.json()
+            # Look for city type destination
+            if 'sr' in data:
+                for result in data['sr']:
+                    if result.get('type') == 'CITY':
+                        return result.get('gaiaId')
+    except Exception as e:
+        print(f"Error getting Hotels.com destination ID: {e}")
+    
+    return None
+
+def search_hotels_hotels_api(destination_id, checkin, checkout, adults, rooms):
+    """Search hotels using Hotels.com API v2"""
+    url = "https://hotels4.p.rapidapi.com/properties/v2/list"
+    
+    payload = {
+        "currency": "EUR",
+        "eapid": 1,
+        "locale": "en_US",
+        "siteId": 300000001,
+        "destination": {
+            "regionId": str(destination_id)
+        },
+        "checkInDate": {
+            "day": int(checkin.split('-')[2]),
+            "month": int(checkin.split('-')[1]),
+            "year": int(checkin.split('-')[0])
+        },
+        "checkOutDate": {
+            "day": int(checkout.split('-')[2]),
+            "month": int(checkout.split('-')[1]),
+            "year": int(checkout.split('-')[0])
+        },
+        "rooms": [
+            {
+                "adults": int(adults),
+                "children": []
+            }
+        ],
+        "resultsStartingIndex": 0,
+        "resultsSize": 25,
+        "sort": "PRICE_LOW_TO_HIGH"
+    }
+    
+    headers = {
+        "content-type": "application/json",
+        "x-rapidapi-key": HOTELS_RAPIDAPI_KEY,
+        "x-rapidapi-host": HOTELS_RAPIDAPI_HOST
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers)
         if response.status_code == 200:
             return response.json()
     except Exception as e:
@@ -323,24 +369,24 @@ def process_booking_hotels(hotels_data, city_info, checkin, checkout, adults, ro
     return processed_hotels
 
 def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults, rooms):
-    """Process Hotels.com hotel data"""
+    """Process Hotels.com hotel data (v2 API format)"""
     processed_hotels = []
     
-    if not hotels_data or 'data' not in hotels_data or 'body' not in hotels_data['data']:
+    if not hotels_data or 'data' not in hotels_data:
         return processed_hotels
     
-    search_results = hotels_data['data']['body'].get('searchResults', {})
-    if 'results' not in search_results:
-        return processed_hotels
+    # v2 API structure
+    properties = hotels_data['data'].get('propertySearch', {}).get('properties', [])
     
-    for i, hotel in enumerate(search_results['results'][:25]):  # Limit to 25
+    for i, hotel in enumerate(properties[:25]):  # Limit to 25
         # Extract hotel information
         hotel_name = hotel.get('name', 'Unknown Hotel')
         
-        # Get coordinates from hotel data
-        coordinate = hotel.get('coordinate', {})
-        if 'lat' in coordinate and 'lon' in coordinate:
-            coordinates = [float(coordinate['lat']), float(coordinate['lon'])]
+        # Get coordinates
+        map_marker = hotel.get('mapMarker', {})
+        if 'latLong' in map_marker:
+            lat_long = map_marker['latLong']
+            coordinates = [float(lat_long['lat']), float(lat_long['lon'])]
         else:
             base_lat, base_lng = city_info['coordinates']
             coordinates = [
@@ -348,33 +394,36 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
                 base_lng + (i * 0.01) - 0.05
             ]
         
-        # Extract pricing from ratePlan
+        # Extract pricing from price object
         price = 'N/A'
-        if 'ratePlan' in hotel and 'price' in hotel['ratePlan']:
-            price_info = hotel['ratePlan']['price']
-            if 'current' in price_info:
-                price_str = price_info['current']
-                # Extract numeric value from price string like "€120"
-                import re
-                price_match = re.search(r'[\d,]+', price_str.replace(',', ''))
-                if price_match:
-                    price = int(price_match.group())
+        price_obj = hotel.get('price', {})
+        if 'lead' in price_obj:
+            price_info = price_obj['lead']
+            if 'amount' in price_info:
+                price = int(price_info['amount'])
+        elif 'displayMessages' in price_obj:
+            # Try to extract price from display messages
+            for msg in price_obj['displayMessages']:
+                if 'lineItems' in msg:
+                    for item in msg['lineItems']:
+                        if 'price' in item and 'amount' in item['price']:
+                            price = int(item['price']['amount'])
+                            break
         
         # Extract rating
         rating = 4.0
-        guest_reviews = hotel.get('guestReviews', {})
-        if 'rating' in guest_reviews:
-            rating = float(guest_reviews['rating'])
-        elif 'unformattedRating' in guest_reviews:
-            rating = float(guest_reviews['unformattedRating'])
+        reviews = hotel.get('reviews', {})
+        if 'score' in reviews:
+            rating = float(reviews['score'])
         
         # Create Hotels.com URL
-        hotels_url = create_hotels_com_url(hotel, checkin, checkout, adults, rooms)
+        property_id = hotel.get('id', '')
+        hotels_url = f"https://hotels.com/h{property_id}.Hotel-Information?checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
         
         processed_hotel = {
-            'id': f"hotels_{hotel.get('id', i)}",
+            'id': f"hotels_{property_id}",
             'name': hotel_name,
-            'address': hotel.get('address', {}).get('streetAddress', city_info['name']),
+            'address': hotel.get('neighborhood', {}).get('name', city_info['name']),
             'coordinates': coordinates,
             'price': price,
             'rating': rating,
@@ -548,8 +597,9 @@ def get_hotels_multiplatform():
         if booking_data:
             booking_hotels = process_booking_hotels(booking_data, city_info, checkin, checkout, adults, rooms, city)
     
-    # Hotels.com search
-    hotels_destination_id = city_info.get('hotels_destination_id')
+    # Hotels.com search (using dynamic destination lookup)
+    hotels_com_hotels = []
+    hotels_destination_id = get_hotels_destination_id(city_info['search_query'])
     if hotels_destination_id:
         hotels_data = search_hotels_hotels_api(hotels_destination_id, checkin, checkout, adults, rooms)
         if hotels_data:
