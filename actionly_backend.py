@@ -414,25 +414,27 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         
         # Get coordinates - handle multiple possible structures
         coordinates = None
-        map_marker = hotel.get('mapMarker', {})
-        
-        # Try different coordinate structures
-        if 'latLong' in map_marker:
-            lat_long = map_marker['latLong']
-            if isinstance(lat_long, dict):
-                if 'lat' in lat_long and 'lon' in lat_long:
-                    coordinates = [float(lat_long['lat']), float(lat_long['lon'])]
-                elif 'latitude' in lat_long and 'longitude' in lat_long:
-                    coordinates = [float(lat_long['latitude']), float(lat_long['longitude'])]
-        
-        # Fallback: Try direct coordinates in hotel object
-        if not coordinates:
-            if 'coordinate' in hotel:
-                coord = hotel['coordinate']
-                if 'lat' in coord and 'lon' in coord:
-                    coordinates = [float(coord['lat']), float(coord['lon'])]
-                elif 'latitude' in coord and 'longitude' in coord:
-                    coordinates = [float(coord['latitude']), float(coord['longitude'])]
+        try:
+            map_marker = hotel.get('mapMarker')
+            if map_marker and isinstance(map_marker, dict):
+                # Try different coordinate structures
+                lat_long = map_marker.get('latLong')
+                if lat_long and isinstance(lat_long, dict):
+                    if 'lat' in lat_long and 'lon' in lat_long:
+                        coordinates = [float(lat_long['lat']), float(lat_long['lon'])]
+                    elif 'latitude' in lat_long and 'longitude' in lat_long:
+                        coordinates = [float(lat_long['latitude']), float(lat_long['longitude'])]
+            
+            # Fallback: Try direct coordinates in hotel object
+            if not coordinates:
+                coordinate = hotel.get('coordinate')
+                if coordinate and isinstance(coordinate, dict):
+                    if 'lat' in coordinate and 'lon' in coordinate:
+                        coordinates = [float(coordinate['lat']), float(coordinate['lon'])]
+                    elif 'latitude' in coordinate and 'longitude' in coordinate:
+                        coordinates = [float(coordinate['latitude']), float(coordinate['longitude'])]
+        except Exception as e:
+            print(f"Coordinate parsing error for {hotel_name}: {e}")
         
         # Final fallback: Use city center with offset
         if not coordinates:
@@ -445,67 +447,79 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         # Extract pricing - handle multiple price structures safely
         price = 'N/A'
         try:
-            price_obj = hotel.get('price', {})
-            
-            # Try lead price first
-            if 'lead' in price_obj and price_obj['lead']:
-                price_info = price_obj['lead']
-                if 'amount' in price_info:
-                    price = int(price_info['amount'])
-            
-            # Try displayMessages if lead price not found
-            elif 'displayMessages' in price_obj:
-                for msg in price_obj['displayMessages']:
-                    if 'lineItems' in msg:
-                        for item in msg['lineItems']:
-                            if 'price' in item and 'amount' in item['price']:
-                                price = int(item['price']['amount'])
-                                break
-                        if price != 'N/A':
-                            break
-            
-            # Try strikeOut price if available
-            elif 'strikeOut' in price_obj and price_obj['strikeOut']:
-                strike_info = price_obj['strikeOut']
-                if 'amount' in strike_info:
-                    price = int(strike_info['amount'])
-            
-            # Try any nested price structure
-            elif isinstance(price_obj, dict):
-                for key, value in price_obj.items():
-                    if isinstance(value, dict) and 'amount' in value:
-                        price = int(value['amount'])
-                        break
+            price_obj = hotel.get('price')
+            if not price_obj:
+                price = 'N/A'
+            else:
+                # Try lead price first
+                lead_price = price_obj.get('lead')
+                if lead_price and isinstance(lead_price, dict) and 'amount' in lead_price:
+                    price = int(lead_price['amount'])
+                else:
+                    # Try displayMessages if lead price not found
+                    display_messages = price_obj.get('displayMessages')
+                    if display_messages and isinstance(display_messages, list):
+                        for msg in display_messages:
+                            if isinstance(msg, dict) and 'lineItems' in msg:
+                                line_items = msg['lineItems']
+                                if isinstance(line_items, list):
+                                    for item in line_items:
+                                        if isinstance(item, dict) and 'price' in item:
+                                            item_price = item['price']
+                                            if isinstance(item_price, dict) and 'amount' in item_price:
+                                                price = int(item_price['amount'])
+                                                break
+                                    if price != 'N/A':
+                                        break
+                    
+                    # Try strikeOut price if available
+                    if price == 'N/A':
+                        strike_out = price_obj.get('strikeOut')
+                        if strike_out and isinstance(strike_out, dict) and 'amount' in strike_out:
+                            price = int(strike_out['amount'])
+                    
+                    # Try any nested price structure
+                    if price == 'N/A' and isinstance(price_obj, dict):
+                        for key, value in price_obj.items():
+                            if isinstance(value, dict) and 'amount' in value:
+                                try:
+                                    price = int(value['amount'])
+                                    break
+                                except (ValueError, TypeError):
+                                    continue
         
-        except (ValueError, TypeError, KeyError) as e:
+        except Exception as e:
             print(f"Price parsing error for {hotel_name}: {e}")
             price = 'N/A'
         
         # Extract rating safely
         rating = 4.0
         try:
-            reviews = hotel.get('reviews', {})
-            if 'score' in reviews and reviews['score']:
-                rating = float(reviews['score'])
-            elif 'rating' in reviews and reviews['rating']:
-                rating = float(reviews['rating'])
-            # Try alternative rating locations
-            elif 'guestReviews' in hotel:
-                guest_reviews = hotel['guestReviews']
-                if 'rating' in guest_reviews:
-                    rating = float(guest_reviews['rating'])
-        except (ValueError, TypeError) as e:
+            reviews = hotel.get('reviews')
+            if reviews and isinstance(reviews, dict):
+                if 'score' in reviews and reviews['score']:
+                    rating = float(reviews['score'])
+                elif 'rating' in reviews and reviews['rating']:
+                    rating = float(reviews['rating'])
+            
+            # Try alternative rating locations if not found
+            if rating == 4.0:
+                guest_reviews = hotel.get('guestReviews')
+                if guest_reviews and isinstance(guest_reviews, dict):
+                    if 'rating' in guest_reviews and guest_reviews['rating']:
+                        rating = float(guest_reviews['rating'])
+        except Exception as e:
             print(f"Rating parsing error for {hotel_name}: {e}")
             rating = 4.0
         
         # Create Hotels.com URL safely
         try:
-            property_id = hotel.get('id', hotel.get('propertyId', f'hotel_{i}'))
+            property_id = hotel.get('id') or hotel.get('propertyId') or f'hotel_{i}'
             hotels_url = f"https://hotels.com/h{property_id}.Hotel-Information?checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
         except Exception as e:
             print(f"URL creation error for {hotel_name}: {e}")
             # Fallback URL
-            hotel_name_safe = hotel_name.replace(' ', '+')
+            hotel_name_safe = hotel_name.replace(' ', '+').replace('&', 'and')
             hotels_url = f"https://hotels.com/search.do?q-destination={hotel_name_safe}&q-check-in={checkin}&q-check-out={checkout}"
         
         processed_hotel = {
@@ -515,29 +529,30 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
         address = city_info['name']  # Default fallback
         try:
             # Try different address structures
-            if 'neighborhood' in hotel and hotel['neighborhood']:
-                neighborhood = hotel['neighborhood']
-                if isinstance(neighborhood, dict) and 'name' in neighborhood:
-                    address = neighborhood['name']
-                elif isinstance(neighborhood, str):
-                    address = neighborhood
-            elif 'address' in hotel and hotel['address']:
-                addr_obj = hotel['address']
-                if isinstance(addr_obj, dict):
+            neighborhood = hotel.get('neighborhood')
+            if neighborhood and isinstance(neighborhood, dict) and 'name' in neighborhood:
+                address = neighborhood['name']
+            elif neighborhood and isinstance(neighborhood, str):
+                address = neighborhood
+            else:
+                # Try address object
+                addr_obj = hotel.get('address')
+                if addr_obj and isinstance(addr_obj, dict):
                     # Try various address fields
                     address = (addr_obj.get('streetAddress') or 
                              addr_obj.get('locality') or 
                              addr_obj.get('region') or 
                              city_info['name'])
-                elif isinstance(addr_obj, str):
+                elif addr_obj and isinstance(addr_obj, str):
                     address = addr_obj
-            elif 'location' in hotel and hotel['location']:
-                location = hotel['location']
-                if isinstance(location, dict):
-                    address = (location.get('address') or 
-                             location.get('name') or 
-                             city_info['name'])
-        except (AttributeError, TypeError) as e:
+                else:
+                    # Try location object
+                    location = hotel.get('location')
+                    if location and isinstance(location, dict):
+                        address = (location.get('address') or 
+                                 location.get('name') or 
+                                 city_info['name'])
+        except Exception as e:
             print(f"Address parsing error for {hotel_name}: {e}")
             address = city_info['name']
             'coordinates': coordinates,
