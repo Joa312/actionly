@@ -664,8 +664,8 @@ def get_cities():
 
 @app.route('/test-hotels-com-api')
 def test_hotels_com_api():
-    """Test Hotels.com API with ACTIVE endpoints (v3/search + v2/list)"""
-    print("Testing Hotels.com API with ACTIVE endpoints...")
+    """Test Hotels.com API with SCHEMA-AWARE parsing"""
+    print("Testing Hotels.com API with correct schema parsing...")
     
     # Test with Stockholm
     city = "Stockholm"
@@ -676,31 +676,54 @@ def test_hotels_com_api():
     hotels_data = search_hotels_com_api(city, checkin, checkout, adults)
     
     if hotels_data:
-        # Try to count hotels from v2 response structure
+        # Enhanced analysis of response structure
+        response_analysis = {
+            'data_type': type(hotels_data).__name__,
+            'keys': list(hotels_data.keys()) if isinstance(hotels_data, dict) else 'Not a dict',
+            'suggestions_count': len(hotels_data.get('suggestions', [])) if isinstance(hotels_data, dict) else 0
+        }
+        
+        # Try to count hotels from various possible structures
         hotel_count = 0
         if isinstance(hotels_data, dict):
-            if 'data' in hotels_data and 'propertySearch' in hotels_data['data']:
-                property_search = hotels_data['data']['propertySearch']
-                if 'properties' in property_search:
-                    hotel_count = len(property_search['properties'])
+            # Check for v3/search response format
+            if 'suggestions' in hotels_data:
+                response_analysis['is_location_response'] = True
+                response_analysis['term'] = hotels_data.get('term')
+            
+            # Check for properties response formats
+            elif 'data' in hotels_data:
+                if 'propertySearch' in hotels_data['data']:
+                    property_search = hotels_data['data']['propertySearch']
+                    if 'properties' in property_search:
+                        hotel_count = len(property_search['properties'])
+                        response_analysis['is_properties_v2_response'] = True
+                elif 'body' in hotels_data['data']:
+                    search_results = hotels_data['data']['body'].get('searchResults', {})
+                    if 'results' in search_results:
+                        hotel_count = len(search_results['results'])
+                        response_analysis['is_properties_list_response'] = True
+            
+            # Direct properties array
             elif 'properties' in hotels_data:
                 hotel_count = len(hotels_data['properties'])
+                response_analysis['is_direct_properties'] = True
         
         return jsonify({
-            'status': 'SUCCESS!',
+            'status': 'SUCCESS!' if hotel_count > 0 else 'PARTIAL_SUCCESS',
             'host': 'hotels4.p.rapidapi.com',
-            'endpoints': '/locations/v3/search + /properties/v2/list (ACTIVE)',
+            'endpoints': '/locations/v3/search with schema-aware parsing',
             'city_searched': city,
-            'raw_data_structure': list(hotels_data.keys()) if isinstance(hotels_data, dict) else 'List format',
+            'response_analysis': response_analysis,
             'hotels_found': hotel_count,
-            'sample_data': str(hotels_data)[:1000] + '...' if len(str(hotels_data)) > 1000 else str(hotels_data),
-            'hotels_com': 'real_api_active_endpoints'
+            'sample_data': str(hotels_data)[:1500] + '...' if len(str(hotels_data)) > 1500 else str(hotels_data),
+            'hotels_com': 'schema_aware_parsing'
         })
     else:
         return jsonify({
             'status': 'FAILED',
             'host': 'hotels4.p.rapidapi.com',
-            'endpoints': '/locations/v3/search + /properties/v2/list (ACTIVE)',
+            'endpoints': '/locations/v3/search with schema-aware parsing',
             'error': 'No data returned from Hotels.com API',
             'hotels_com': 'api_failed'
         })
@@ -799,9 +822,9 @@ def get_hotels_multiplatform():
     })
 
 @app.route('/test')
-def test_multiplatform():
-    """Test endpoint with multiplatform Stockholm hotels"""
-    return get_hotels_multiplatform()
+def test_enhanced_booking():
+    """Test endpoint with enhanced Booking.com search"""
+    return get_hotels_enhanced_booking()
 
 if __name__ == '__main__':
     print("🚀 Starting STAYFINDR Backend...")
