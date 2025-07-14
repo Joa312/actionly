@@ -664,8 +664,8 @@ def get_cities():
 
 @app.route('/test-hotels-com-api')
 def test_hotels_com_api():
-    """Test Hotels.com API directly with your /locations/v3/search endpoint"""
-    print("Testing Hotels.com API...")
+    """Test Hotels.com API directly with CORRECT HOST (hotels4.p.rapidapi.com)"""
+    print("Testing Hotels.com API with correct host...")
     
     # Test with Stockholm
     city = "Stockholm"
@@ -676,19 +676,31 @@ def test_hotels_com_api():
     hotels_data = search_hotels_com_api(city, checkin, checkout, adults)
     
     if hotels_data:
+        # Try to count hotels from different possible structures
+        hotel_count = 0
+        if isinstance(hotels_data, dict):
+            if 'data' in hotels_data and 'body' in hotels_data['data']:
+                search_results = hotels_data['data']['body'].get('searchResults', {})
+                if 'results' in search_results:
+                    hotel_count = len(search_results['results'])
+            elif 'results' in hotels_data:
+                hotel_count = len(hotels_data['results'])
+        
         return jsonify({
             'status': 'SUCCESS!',
-            'endpoint': '/locations/v3/search',
+            'host': 'hotels4.p.rapidapi.com',
+            'endpoint': '/locations/v2/search + /properties/list',
             'city_searched': city,
             'raw_data_structure': list(hotels_data.keys()) if isinstance(hotels_data, dict) else 'List format',
-            'hotels_found': len(hotels_data.get('data', {}).get('body', {}).get('searchResults', {}).get('results', [])) if isinstance(hotels_data, dict) else 'Unknown structure',
+            'hotels_found': hotel_count,
             'sample_data': str(hotels_data)[:1000] + '...' if len(str(hotels_data)) > 1000 else str(hotels_data),
-            'hotels_com': 'real_api_/locations/v3/search'
+            'hotels_com': 'real_api_hotels4.p.rapidapi.com'
         })
     else:
         return jsonify({
             'status': 'FAILED',
-            'endpoint': '/locations/v3/search',
+            'host': 'hotels4.p.rapidapi.com',
+            'endpoint': '/locations/v2/search + /properties/list',
             'error': 'No data returned from Hotels.com API',
             'hotels_com': 'api_failed'
         })
