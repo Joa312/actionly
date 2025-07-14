@@ -1,6 +1,6 @@
 # STAYFINDR BACKEND - European Hotel Search Engine
 # Flask backend with RapidAPI Booking.com integration + Hotels.com
-# FIXED: Complete clean version
+# EMERGENCY CLEAN VERSION - NO DUPLICATES, NO ERRORS
 
 import os
 from flask import Flask, request, jsonify, render_template_string
@@ -16,9 +16,8 @@ CORS(app)
 
 # RapidAPI Configuration
 RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
-RAPIDAPI_HOST = "booking-com18.p.rapidapi.com"
-HOTELS_COM_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
-HOTELS_COM_HOST = "hotels4.p.rapidapi.com"
+RAPIDAPI_HOST_BOOKING = "booking-com18.p.rapidapi.com"
+RAPIDAPI_HOST_HOTELS = "hotels4.p.rapidapi.com"
 
 # European Cities Configuration - 29 major destinations
 CITIES = {
@@ -183,37 +182,37 @@ COUNTRY_CODES = {
     'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
 }
 
-# Room Types Configuration with Junior Suite
+# Room Type Configuration with Junior Suite
 ROOM_TYPES = {
     'single': {
         'name': 'Single Room',
+        'description': 'Perfect for solo travelers',
         'guests': 1,
-        'description': 'Single Room - Perfect for solo travelers',
-        'keywords': ['single', 'single room', 'solo', 'one bed']
+        'keywords': ['single', 'solo', 'individual']
     },
     'double': {
-        'name': 'Double Room', 
+        'name': 'Double Room',
+        'description': 'Ideal for couples',
         'guests': 2,
-        'description': 'Double Room - Ideal for couples',
-        'keywords': ['double', 'double room', 'couple', 'two bed', 'standard']
+        'keywords': ['double', 'couple', 'standard', 'queen', 'king']
     },
     'family': {
         'name': 'Family Room',
+        'description': 'Spacious accommodation for families',
         'guests': 4,
-        'description': 'Family Room - Spacious for families',
-        'keywords': ['family', 'family room', 'triple', 'quad', 'bunk']
+        'keywords': ['family', 'triple', 'quad', 'bunk', 'connecting']
     },
     'junior_suite': {
         'name': 'Junior Suite',
+        'description': 'Spacious room with sitting area',
         'guests': 2,
-        'description': 'Junior Suite - Spacious room with sitting area',
         'keywords': ['junior suite', 'junior', 'suite', 'sitting area', 'upgraded', 'deluxe']
     },
     'suite': {
         'name': 'Suite/Apartment',
+        'description': 'Luxury accommodation with separate living area',
         'guests': 3,
-        'description': 'Suite/Apartment - Luxury accommodation with separate areas',
-        'keywords': ['suite', 'apartment', 'luxury', 'presidential', 'executive']
+        'keywords': ['suite', 'apartment', 'penthouse', 'presidential', 'luxury', 'executive']
     }
 }
 
@@ -224,7 +223,7 @@ def get_location_id(city_query):
     querystring = {"query": city_query, "languageCode": "en"}
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
+        "x-rapidapi-host": RAPIDAPI_HOST_BOOKING
     }
     
     try:
@@ -253,7 +252,7 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
+        "x-rapidapi-host": RAPIDAPI_HOST_BOOKING
     }
     
     try:
@@ -265,119 +264,74 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     
     return None
 
-def search_hotels_com_suggest(query):
-    """Step 1: Get destination ID from Hotels.com suggest endpoint"""
-    url = "https://hotels4.p.rapidapi.com/locations/v3/search"
+def search_hotels_com_api(city, checkin, checkout, adults):
+    """Search hotels using Hotels.com two-step process: suggest + search"""
     
-    querystring = {"q": query, "locale": "en_US", "langid": "1033", "siteid": "300000001"}
     headers = {
-        "x-rapidapi-key": HOTELS_COM_KEY,
-        "x-rapidapi-host": HOTELS_COM_HOST
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST_HOTELS
     }
     
     try:
-        response = requests.get(url, headers=headers, params=querystring)
-        if response.status_code == 200:
-            data = response.json()
-            if 'sr' in data and data['sr']:
-                for item in data['sr']:
-                    if item.get('type') == 'CITY':
-                        return {
-                            'destination_id': item.get('gaiaId'),
-                            'name': item.get('regionNames', {}).get('fullName', ''),
-                            'country': item.get('hierarchyInfo', {}).get('country', {}).get('name', '')
-                        }
+        # Step 1: Get destination ID from suggest
+        suggest_url = "https://hotels4.p.rapidapi.com/suggest"
+        suggest_params = {
+            "query": city,
+            "locale": "en_US"
+        }
+        
+        suggest_response = requests.get(suggest_url, headers=headers, params=suggest_params)
+        
+        if suggest_response.status_code == 200:
+            suggest_data = suggest_response.json()
+            
+            # Find destination ID from suggestions
+            destination_id = None
+            if 'suggestions' in suggest_data:
+                for suggestion_group in suggest_data['suggestions']:
+                    if 'entities' in suggestion_group:
+                        for entity in suggestion_group['entities']:
+                            if entity.get('type') == 'CITY':
+                                destination_id = entity.get('destinationId')
+                                break
+                        if destination_id:
+                            break
+            
+            if destination_id:
+                # Step 2: Search hotels with destination ID
+                hotels_url = "https://hotels4.p.rapidapi.com/Hotels/Search"
+                hotels_params = {
+                    "destinationId": destination_id,
+                    "checkIn": checkin,
+                    "checkOut": checkout,
+                    "adults": adults,
+                    "rooms": 1,
+                    "locale": "en_US",
+                    "currency": "USD",
+                    "sort": "PRICE",
+                    "pageSize": "25"
+                }
+                
+                hotels_response = requests.get(hotels_url, headers=headers, params=hotels_params)
+                
+                if hotels_response.status_code == 200:
+                    return hotels_response.json()
+    
     except Exception as e:
-        print(f"Error in Hotels.com suggest: {e}")
+        print(f"Error in Hotels.com search: {e}")
     
     return None
-
-def search_hotels_com_hotels(destination_id, checkin, checkout, adults):
-    """Step 2: Search hotels using destination ID"""
-    url = "https://hotels4.p.rapidapi.com/properties/v2/list"
-    
-    payload = {
-        "currency": "USD",
-        "eapid": 1,
-        "locale": "en_US",
-        "siteId": 300000001,
-        "destination": {"regionId": destination_id},
-        "checkInDate": {
-            "day": int(checkin.split('-')[2]),
-            "month": int(checkin.split('-')[1]),
-            "year": int(checkin.split('-')[0])
-        },
-        "checkOutDate": {
-            "day": int(checkout.split('-')[2]),
-            "month": int(checkout.split('-')[1]),
-            "year": int(checkout.split('-')[0])
-        },
-        "rooms": [{"adults": int(adults)}],
-        "resultsStartingIndex": 0,
-        "resultsSize": 20,
-        "sort": "PRICE_LOW_TO_HIGH"
-    }
-    
-    headers = {
-        "content-type": "application/json",
-        "x-rapidapi-key": HOTELS_COM_KEY,
-        "x-rapidapi-host": HOTELS_COM_HOST
-    }
-    
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        print(f"Error in Hotels.com hotels search: {e}")
-    
-    return None
-
-def search_hotels_com_api_working(city_query, checkin, checkout, adults):
-    """Two-step Hotels.com search: suggest → hotels"""
-    # Step 1: Get destination ID
-    destination_info = search_hotels_com_suggest(city_query)
-    if not destination_info or not destination_info.get('destination_id'):
-        return None
-    
-    # Step 2: Search hotels with destination ID
-    return search_hotels_com_hotels(
-        destination_info['destination_id'], 
-        checkin, 
-        checkout, 
-        adults
-    )
 
 def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key):
     """Create hotel name-based booking URL for better targeting"""
     
-    # Priority 1: Use direct hotel URL from API if available
-    direct_urls = [
-        hotel.get('url'),
-        hotel.get('link'), 
-        hotel.get('booking_url'),
-        hotel.get('hotelUrl'),
-        hotel.get('deepLink')
-    ]
-    
-    for url in direct_urls:
-        if url and 'booking.com' in str(url):
-            # Add search parameters to direct URL
-            if '?' in url:
-                return f"{url}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
-            else:
-                return f"{url}?checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
-    
-    # Priority 2: Create hotel name-based search URL
+    # Get hotel details
     hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
     hotel_name = hotel.get('name', 'Hotel')
     
     if hotel_id and hotel_name:
         # Get country code for the city
         country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        
-        # Encode hotel name properly for URL
-        hotel_name_encoded = quote_plus(hotel_name)
         
         # Create hotel name-based search URL
         base_params = {
@@ -397,23 +351,33 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_
         
         return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
     
-    # Priority 3: Fallback to hotel ID-based URL
-    if hotel_id:
-        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        return f"https://www.booking.com/hotel/{country_code.split('-')[0]}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
-    
-    # Priority 4: Generic search by hotel name in the city
+    # Fallback URL
     hotel_name = hotel.get('name', '').replace(' ', '+')
     city_name = city_info['name'].replace(' ', '+')
     country_code = COUNTRY_CODES.get(city_key, 'en-gb')
     return f"https://www.booking.com/searchresults.{country_code}.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
 
-def create_hotels_com_url(hotel, checkin, checkout, adults, rooms):
+def create_hotels_com_url(hotel, checkin, checkout, adults):
     """Create Hotels.com booking URL"""
-    hotel_id = hotel.get('id') or hotel.get('propertyId')
-    if hotel_id:
-        return f"https://www.hotels.com/ho{hotel_id}/?q-check-in={checkin}&q-check-out={checkout}&q-rooms=1&q-room-0-adults={adults}&q-room-0-children=0"
-    return "https://www.hotels.com"
+    
+    # Try to get URL from hotel data
+    if 'cardLink' in hotel and isinstance(hotel['cardLink'], dict):
+        resource = hotel['cardLink'].get('resource', {})
+        if isinstance(resource, dict):
+            url = resource.get('value', '')
+            if url:
+                if not url.startswith('http'):
+                    url = f"https://hotels.com{url}"
+                
+                # Add parameters
+                if '?' not in url:
+                    url += f"?checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
+                
+                return url
+    
+    # Fallback
+    property_id = hotel.get('id', 'unknown')
+    return f"https://hotels.com/h{property_id}.Hotel-Information?checkIn={checkin}&checkOut={checkout}&rooms[0].adults={adults}&rooms[0].children=0"
 
 def process_hotel_data_booking(hotels_data, city_info, checkin, checkout, adults, rooms, city_key):
     """Process and format Booking.com hotel data"""
@@ -443,7 +407,6 @@ def process_hotel_data_booking(hotels_data, city_info, checkin, checkout, adults
             if 'value' in price_info:
                 total_price = price_info['value']
                 try:
-                    from datetime import datetime
                     checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
                     checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
                     nights = (checkout_date - checkin_date).days
@@ -470,74 +433,124 @@ def process_hotel_data_booking(hotels_data, city_info, checkin, checkout, adults
         booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key)
         
         processed_hotel = {
-            'id': hotel.get('id') or hotel.get('hotel_id') or f"booking_{i}",
+            'id': hotel.get('id') or f"booking_{i}",
             'name': hotel_name,
             'address': address,
             'coordinates': coordinates,
             'price': price,
             'rating': rating,
-            'booking_url': booking_url,
-            'source': 'booking.com'
+            'platform': 'Booking.com',
+            'booking_url': booking_url
         }
         
         processed_hotels.append(processed_hotel)
     
     return processed_hotels
 
-def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults, rooms, room_type):
+def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults, rooms):
     """Process Hotels.com hotel data"""
     processed_hotels = []
     
-    if not hotels_data or 'data' not in hotels_data:
+    if not isinstance(hotels_data, dict) or 'data' not in hotels_data:
         return processed_hotels
     
-    properties = hotels_data['data'].get('propertySearch', {}).get('properties', [])
+    data = hotels_data.get('data', {})
     
-    for i, hotel in enumerate(properties):
-        # Extract hotel information
-        hotel_name = hotel.get('name', 'Unknown Hotel')
+    # Extract hotels from propertySearchListings
+    hotels = []
+    if isinstance(data, dict) and 'propertySearchListings' in data:
+        hotels = data.get('propertySearchListings', [])
+    
+    for i, hotel in enumerate(hotels[:20]):  # Limit to 20
+        if not isinstance(hotel, dict):
+            continue
         
-        # Get coordinates
-        coordinates_data = hotel.get('mapMarker', {})
-        if coordinates_data and 'latLong' in coordinates_data:
-            lat_long = coordinates_data['latLong']
-            coordinates = [lat_long.get('latitude', 0), lat_long.get('longitude', 0)]
-        else:
-            base_lat, base_lng = city_info['coordinates']
-            coordinates = [
-                base_lat + (i * 0.01) - 0.05,
-                base_lng + (i * 0.01) - 0.05
-            ]
+        # Hotel name
+        hotel_name = 'Unknown Hotel'
+        if 'headingSection' in hotel and isinstance(hotel['headingSection'], dict):
+            hotel_name = hotel['headingSection'].get('heading', f"Hotel {i+1}")
         
-        # Extract pricing
+        # Coordinates
+        coordinates = city_info.get('coordinates', [0.0, 0.0])
+        try:
+            if 'mapMarker' in hotel and isinstance(hotel['mapMarker'], dict):
+                lat_long = hotel['mapMarker'].get('latLong', {})
+                if isinstance(lat_long, dict):
+                    lat = lat_long.get('lat') or lat_long.get('latitude')
+                    lon = lat_long.get('lon') or lat_long.get('longitude')
+                    if lat and lon:
+                        coordinates = [float(lat), float(lon)]
+        except (TypeError, ValueError):
+            pass
+        
+        # Price extraction
         price = 'N/A'
-        price_data = hotel.get('price', {})
-        if price_data and 'lead' in price_data:
-            lead_price = price_data['lead']
-            if 'amount' in lead_price:
-                price = int(lead_price['amount'])
+        try:
+            if 'priceSection' in hotel and isinstance(hotel['priceSection'], dict):
+                price_summary = hotel['priceSection'].get('priceSummary', {})
+                if isinstance(price_summary, dict):
+                    display_messages = price_summary.get('displayMessages', [])
+                    if display_messages and len(display_messages) > 0:
+                        first_message = display_messages[0]
+                        if isinstance(first_message, dict) and 'lineItems' in first_message:
+                            line_items = first_message.get('lineItems', [])
+                            if line_items and len(line_items) > 0:
+                                first_item = line_items[0]
+                                if isinstance(first_item, dict) and 'price' in first_item:
+                                    price_obj = first_item.get('price', {})
+                                    if isinstance(price_obj, dict):
+                                        formatted_price = price_obj.get('formatted', 'N/A')
+                                        if formatted_price and formatted_price != 'N/A':
+                                            import re
+                                            price_match = re.search(r'[\d,]+', formatted_price)
+                                            if price_match:
+                                                price = int(price_match.group().replace(',', ''))
+        except (TypeError, ValueError, AttributeError):
+            price = 'N/A'
         
-        # Extract rating
+        # Rating
         rating = 4.0
-        reviews_data = hotel.get('reviews', {})
-        if reviews_data and 'score' in reviews_data:
-            rating = float(reviews_data['score'])
+        try:
+            if 'guestRatingSectionV2' in hotel and isinstance(hotel['guestRatingSectionV2'], dict):
+                badge = hotel['guestRatingSectionV2'].get('badge', {})
+                if isinstance(badge, dict):
+                    rating_text = badge.get('text', '')
+                    if rating_text:
+                        import re
+                        rating_match = re.search(r'(\d+\.?\d*)', rating_text)
+                        if rating_match:
+                            extracted_rating = float(rating_match.group())
+                            if extracted_rating > 5:
+                                rating = extracted_rating / 2
+                            else:
+                                rating = extracted_rating
+        except (TypeError, ValueError, AttributeError):
+            rating = 4.0
         
-        # Extract address
-        address = hotel.get('neighborhood', {}).get('name', city_info['name'])
+        # Address
+        address = city_info.get('name', 'Unknown Location')
+        try:
+            if 'neighborhoodSection' in hotel and isinstance(hotel['neighborhoodSection'], dict):
+                neighborhood = hotel['neighborhoodSection'].get('neighborhood', {})
+                if isinstance(neighborhood, dict):
+                    neighborhood_name = neighborhood.get('name')
+                    if neighborhood_name:
+                        address = neighborhood_name
+        except (TypeError, AttributeError):
+            pass
         
-        # Create Hotels.com URL
-        booking_url = create_hotels_com_url(hotel, checkin, checkout, adults, rooms)
+        # Booking URL
+        booking_url = create_hotels_com_url(hotel, checkin, checkout, adults)
         
         processed_hotel = {
-            'id': hotel.get('id') or f"hotels_com_{i}",
+            'id': f"hotels_{hotel.get('id', i)}",
             'name': hotel_name,
             'address': address,
             'coordinates': coordinates,
             'price': price,
             'rating': rating,
-            'booking_url': booking_url,
-            'source': 'hotels.com'
+            'platform': 'Hotels.com',
+            'booking_url': booking_url
         }
         
         processed_hotels.append(processed_hotel)
@@ -547,61 +560,14 @@ def process_hotels_com_hotels(hotels_data, city_info, checkin, checkout, adults,
 @app.route('/')
 def home():
     """API Documentation Page"""
-    return render_template_string('''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🏨 STAYFINDR Backend API</title>
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-            h1 { color: #2c3e50; }
-            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
-            .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
-            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
-            .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
-        </style>
-    </head>
-    <body>
-        <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend for European hotel search with multiplatform support</p>
-        
-        <div class="feature">
-            <strong>✅ MULTIPLATFORM: Booking.com + Hotels.com</strong><br>
-            Two-step Hotels.com integration with suggest + hotels endpoints
-        </div>
-        
-        <h2>Available endpoints:</h2>
-        <div class="endpoint">
-            <strong>/api/hotels</strong> - Get hotels from both platforms<br>
-            Parameters: city, checkin, checkout, adults, rooms, room_type<br>
-            <em>Returns combined results from Booking.com and Hotels.com</em>
-        </div>
-        <div class="endpoint">
-            <strong>/api/cities</strong> - List all 29 cities
-        </div>
-        <div class="endpoint">
-            <strong>/test</strong> - Test multiplatform search
-        </div>
-        <div class="endpoint">
-            <strong>/debug-hotels-com</strong> - Debug Hotels.com API
-        </div>
-        
-        <h2>Room types supported:</h2>
-        <div class="cities">
-            {% for room_type in room_types %}
-            <div class="city">{{ room_type }}</div>
-            {% endfor %}
-        </div>
-        
-        <h2>Cities supported:</h2>
-        <div class="cities">
-            {% for city in cities %}
-            <div class="city">{{ city }}</div>
-            {% endfor %}
-        </div>
-    </body>
-    </html>
-    ''', cities=list(CITIES.keys()), room_types=list(ROOM_TYPES.keys()))
+    return jsonify({
+        'name': 'STAYFINDR Backend - MULTIPLATFORM',
+        'status': 'Online',
+        'platforms': ['booking.com', 'hotels.com'],
+        'cities': len(CITIES),
+        'room_types': len(ROOM_TYPES),
+        'message': 'European hotel search with multiplatform support'
+    })
 
 @app.route('/api/cities')
 def get_cities():
@@ -622,49 +588,124 @@ def get_room_types():
 @app.route('/debug-hotels-com')
 def debug_hotels_com():
     """Debug Hotels.com API step by step"""
-    city_query = "Stockholm Sweden"
     
     debug_info = {
-        'step_1': 'Testing Hotels.com suggest endpoint',
-        'query': city_query,
-        'timestamp': datetime.now().isoformat()
+        'test_parameters': {
+            'city': 'Stockholm',
+            'checkin': '2025-07-15',
+            'checkout': '2025-07-16',
+            'adults': 2
+        },
+        'step_1_suggest': {},
+        'step_2_hotels_search': {},
+        'final_analysis': {}
     }
     
-    # Step 1: Test suggest endpoint
-    destination_info = search_hotels_com_suggest(city_query)
-    debug_info['step_1_result'] = destination_info
+    city = "Stockholm"
+    checkin = "2025-07-15"
+    checkout = "2025-07-16"
+    adults = 2
     
-    if destination_info and destination_info.get('destination_id'):
-        debug_info['step_2'] = 'Testing Hotels.com hotels search'
-        debug_info['destination_id'] = destination_info['destination_id']
-        
-        # Step 2: Test hotels search
-        hotels_data = search_hotels_com_hotels(
-            destination_info['destination_id'],
-            '2025-07-15',
-            '2025-07-16', 
-            '2'
-        )
-        
-        debug_info['step_2_result'] = {
-            'has_data': hotels_data is not None,
-            'data_keys': list(hotels_data.keys()) if hotels_data else [],
-            'sample_data': str(hotels_data)[:500] if hotels_data else None
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST_HOTELS
+    }
+    
+    try:
+        # Step 1: Test suggest endpoint
+        suggest_url = "https://hotels4.p.rapidapi.com/suggest"
+        suggest_params = {
+            "query": city,
+            "locale": "en_US"
         }
         
-        if hotels_data and 'data' in hotels_data:
-            properties = hotels_data['data'].get('propertySearch', {}).get('properties', [])
-            debug_info['hotels_found'] = len(properties)
-            if properties:
-                debug_info['sample_hotel'] = {
-                    'name': properties[0].get('name'),
-                    'id': properties[0].get('id'),
-                    'price': properties[0].get('price', {})
+        suggest_response = requests.get(suggest_url, headers=headers, params=suggest_params)
+        
+        debug_info['step_1_suggest'] = {
+            'url': suggest_url,
+            'params': suggest_params,
+            'status_code': suggest_response.status_code,
+            'response_size': len(suggest_response.text) if suggest_response.text else 0
+        }
+        
+        if suggest_response.status_code == 200:
+            suggest_data = suggest_response.json()
+            debug_info['step_1_suggest']['response_keys'] = list(suggest_data.keys())
+            
+            # Find destination ID
+            destination_id = None
+            if 'suggestions' in suggest_data:
+                for suggestion_group in suggest_data['suggestions']:
+                    if 'entities' in suggestion_group:
+                        for entity in suggestion_group['entities']:
+                            if entity.get('type') == 'CITY':
+                                destination_id = entity.get('destinationId')
+                                debug_info['step_1_suggest']['found_city'] = {
+                                    'name': entity.get('name'),
+                                    'destination_id': destination_id
+                                }
+                                break
+                        if destination_id:
+                            break
+            
+            if destination_id:
+                # Step 2: Test hotels search
+                hotels_url = "https://hotels4.p.rapidapi.com/Hotels/Search"
+                hotels_params = {
+                    "destinationId": destination_id,
+                    "checkIn": checkin,
+                    "checkOut": checkout,
+                    "adults": adults,
+                    "rooms": 1,
+                    "locale": "en_US",
+                    "currency": "USD",
+                    "sort": "PRICE",
+                    "pageSize": "25"
                 }
+                
+                hotels_response = requests.get(hotels_url, headers=headers, params=hotels_params)
+                
+                debug_info['step_2_hotels_search'] = {
+                    'url': hotels_url,
+                    'params': hotels_params,
+                    'status_code': hotels_response.status_code,
+                    'response_size': len(hotels_response.text) if hotels_response.text else 0
+                }
+                
+                if hotels_response.status_code == 200:
+                    hotels_data = hotels_response.json()
+                    debug_info['step_2_hotels_search']['response_keys'] = list(hotels_data.keys())
+                    
+                    # Count hotels
+                    hotel_count = 0
+                    if 'data' in hotels_data and 'propertySearchListings' in hotels_data['data']:
+                        hotel_count = len(hotels_data['data']['propertySearchListings'])
+                        debug_info['step_2_hotels_search']['hotels_found'] = hotel_count
+                        
+                        if hotel_count > 0:
+                            first_hotel = hotels_data['data']['propertySearchListings'][0]
+                            if 'headingSection' in first_hotel:
+                                debug_info['step_2_hotels_search']['sample_hotel'] = first_hotel['headingSection'].get('heading')
+                else:
+                    debug_info['step_2_hotels_search']['error'] = f"HTTP {hotels_response.status_code}"
+            else:
+                debug_info['step_2_hotels_search']['error'] = 'No destination ID found'
         else:
-            debug_info['error'] = 'No hotels data found in response'
-    else:
-        debug_info['error'] = 'No destination ID found in suggest response'
+            debug_info['step_1_suggest']['error'] = f"HTTP {suggest_response.status_code}"
+    
+    except Exception as e:
+        debug_info['exception'] = str(e)
+    
+    # Final analysis
+    step1_success = 'found_city' in debug_info['step_1_suggest']
+    step2_success = debug_info['step_2_hotels_search'].get('hotels_found', 0) > 0
+    
+    debug_info['final_analysis'] = {
+        'step1_success': step1_success,
+        'step2_success': step2_success,
+        'overall_success': step1_success and step2_success,
+        'hotels_found': debug_info['step_2_hotels_search'].get('hotels_found', 0)
+    }
     
     return jsonify(debug_info)
 
@@ -711,7 +752,7 @@ def get_hotels_multiplatform():
     
     # Platform 2: Hotels.com
     hotels_com_hotels = []
-    hotels_com_data = search_hotels_com_api_working(city_info['search_query'], checkin, checkout, adults)
+    hotels_com_data = search_hotels_com_api(city_info['search_query'], checkin, checkout, adults)
     
     if hotels_com_data:
         hotels_com_hotels = process_hotels_com_hotels(
@@ -720,8 +761,7 @@ def get_hotels_multiplatform():
             checkin,
             checkout,
             adults,
-            rooms,
-            room_type
+            rooms
         )
     
     # Combine all hotels
