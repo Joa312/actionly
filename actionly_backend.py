@@ -664,7 +664,7 @@ def get_cities():
 
 @app.route('/test-hotels-com-api')
 def test_hotels_com_api():
-    """Test Hotels.com API directly with your /Hotel/Search endpoint"""
+    """Test Hotels.com API directly with your /locations/v3/search endpoint"""
     print("Testing Hotels.com API...")
     
     # Test with Stockholm
@@ -678,17 +678,17 @@ def test_hotels_com_api():
     if hotels_data:
         return jsonify({
             'status': 'SUCCESS!',
-            'endpoint': '/Hotel/Search',
+            'endpoint': '/locations/v3/search',
             'city_searched': city,
             'raw_data_structure': list(hotels_data.keys()) if isinstance(hotels_data, dict) else 'List format',
-            'hotels_found': len(hotels_data.get('data', [])) if isinstance(hotels_data, dict) and 'data' in hotels_data else 'Unknown structure',
-            'sample_data': str(hotels_data)[:500] + '...' if len(str(hotels_data)) > 500 else str(hotels_data),
-            'hotels_com': 'real_api_/Hotel/Search'
+            'hotels_found': len(hotels_data.get('data', {}).get('body', {}).get('searchResults', {}).get('results', [])) if isinstance(hotels_data, dict) else 'Unknown structure',
+            'sample_data': str(hotels_data)[:1000] + '...' if len(str(hotels_data)) > 1000 else str(hotels_data),
+            'hotels_com': 'real_api_/locations/v3/search'
         })
     else:
         return jsonify({
             'status': 'FAILED',
-            'endpoint': '/Hotel/Search',
+            'endpoint': '/locations/v3/search',
             'error': 'No data returned from Hotels.com API',
             'hotels_com': 'api_failed'
         })
