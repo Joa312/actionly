@@ -664,8 +664,8 @@ def get_cities():
 
 @app.route('/test-hotels-com-api')
 def test_hotels_com_api():
-    """Test Hotels.com API directly with CORRECT HOST (hotels4.p.rapidapi.com)"""
-    print("Testing Hotels.com API with correct host...")
+    """Test Hotels.com API with ACTIVE endpoints (v3/search + v2/list)"""
+    print("Testing Hotels.com API with ACTIVE endpoints...")
     
     # Test with Stockholm
     city = "Stockholm"
@@ -676,31 +676,31 @@ def test_hotels_com_api():
     hotels_data = search_hotels_com_api(city, checkin, checkout, adults)
     
     if hotels_data:
-        # Try to count hotels from different possible structures
+        # Try to count hotels from v2 response structure
         hotel_count = 0
         if isinstance(hotels_data, dict):
-            if 'data' in hotels_data and 'body' in hotels_data['data']:
-                search_results = hotels_data['data']['body'].get('searchResults', {})
-                if 'results' in search_results:
-                    hotel_count = len(search_results['results'])
-            elif 'results' in hotels_data:
-                hotel_count = len(hotels_data['results'])
+            if 'data' in hotels_data and 'propertySearch' in hotels_data['data']:
+                property_search = hotels_data['data']['propertySearch']
+                if 'properties' in property_search:
+                    hotel_count = len(property_search['properties'])
+            elif 'properties' in hotels_data:
+                hotel_count = len(hotels_data['properties'])
         
         return jsonify({
             'status': 'SUCCESS!',
             'host': 'hotels4.p.rapidapi.com',
-            'endpoint': '/locations/v2/search + /properties/list',
+            'endpoints': '/locations/v3/search + /properties/v2/list (ACTIVE)',
             'city_searched': city,
             'raw_data_structure': list(hotels_data.keys()) if isinstance(hotels_data, dict) else 'List format',
             'hotels_found': hotel_count,
             'sample_data': str(hotels_data)[:1000] + '...' if len(str(hotels_data)) > 1000 else str(hotels_data),
-            'hotels_com': 'real_api_hotels4.p.rapidapi.com'
+            'hotels_com': 'real_api_active_endpoints'
         })
     else:
         return jsonify({
             'status': 'FAILED',
             'host': 'hotels4.p.rapidapi.com',
-            'endpoint': '/locations/v2/search + /properties/list',
+            'endpoints': '/locations/v3/search + /properties/v2/list (ACTIVE)',
             'error': 'No data returned from Hotels.com API',
             'hotels_com': 'api_failed'
         })
