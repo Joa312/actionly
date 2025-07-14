@@ -1,6 +1,6 @@
 # STAYFINDR BACKEND - European Hotel Search Engine
 # Flask backend with RapidAPI Booking.com integration + WORKING Hotels.com
-# BREAKTHROUGH: Two-step Hotels.com using suggest + Hotels/Search
+# FIXED: Clean version without duplicated code
 
 import os
 from flask import Flask, request, jsonify, render_template_string
@@ -685,6 +685,17 @@ def test_hotels_com_working():
                 sample_hotel = first_hotel['headingSection'].get('heading')
         
         return jsonify({
+            'status': 'SUCCESS!' if hotel_count > 0 else 'PARTIAL',
+            'host': 'hotels4.p.rapidapi.com',
+            'endpoints': '/suggest + /Hotels/Search (TWO-STEP WORKING PROCESS)',
+            'city_searched': city,
+            'hotels_found': hotel_count,
+            'total_available': total_available,
+            'sample_hotel': sample_hotel,
+            'hotels_com': 'two_step_suggest_then_search'
+        })
+    else:
+        return jsonify({
             'status': 'FAILED',
             'host': 'hotels4.p.rapidapi.com',
             'endpoints': '/suggest + /Hotels/Search (TWO-STEP WORKING PROCESS)',
@@ -790,15 +801,4 @@ if __name__ == '__main__':
     print("🔗 Two-step Hotels.com: suggest → search")
     print("✅ Room filtering with Junior Suite support")
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)ify({
-            'status': 'SUCCESS!' if hotel_count > 0 else 'PARTIAL',
-            'host': 'hotels4.p.rapidapi.com',
-            'endpoints': '/suggest + /Hotels/Search (TWO-STEP WORKING PROCESS)',
-            'city_searched': city,
-            'hotels_found': hotel_count,
-            'total_available': total_available,
-            'sample_hotel': sample_hotel,
-            'hotels_com': 'two_step_suggest_then_search'
-        })
-    else:
-        return json
+    app.run(debug=True, host='0.0.0.0', port=port)
