@@ -784,109 +784,78 @@ def get_hotels():
 
 @app.route('/test')
 def test_stockholm():
-    """Test endpoint with Stockholm hotels - demonstrates all room types"""
-    # Test with Junior Suite to showcase new feature
-    test_params = {
-        'city': 'stockholm',
-        'checkin': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
-        'checkout': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
-        'adults': '2',
-        'rooms': '1',
-        'room_type': 'junior_suite'
-    }
+    """Test endpoint with Stockholm hotels - demonstrates Junior Suite"""
+    # Test Junior Suite to showcase new feature
+    city = 'stockholm'
+    checkin = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    checkout = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
+    adults = '2'
+    rooms = '1'
+    room_type = 'junior_suite'
     
-    # Use the main hotels endpoint
-    original_args = request.args
-    request.args = type('Args', (), test_params)()
+    # Validate inputs (same as main endpoint)
+    if city not in CITIES:
+        return jsonify({'error': f'City {city} not supported'}), 400
     
-    result = get_hotels()
-    request.args = original_args
+    if room_type not in ROOM_TYPES:
+        return jsonify({'error': f'Room type {room_type} not supported'}), 400
     
-    return result
-
-@app.route('/api/analytics')
-def get_analytics():
-    """Basic analytics endpoint for monitoring"""
-    return jsonify({
-        'cache_stats': {
-            'total_entries': len(api_manager.cache),
-            'cache_ttl_minutes': api_manager.cache_ttl // 60
-        },
-        'supported_features': {
-            'cities': len(CITIES),
-            'room_types': len(ROOM_TYPES),
-            'countries': len(set([city['country'] for city in CITIES.values()])),
-            'booking_domains': len(BOOKING_DOMAINS)
-        },
-        'api_status': {
-            'version': '2.0',
-            'uptime': 'operational',
-            'multi_platform': True,
-            'intelligent_fallback': True,
-            'junior_suite_support': True
+    try:
+        # Validate dates
+        checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
+        checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
+        
+        if checkin_date >= checkout_date:
+            return jsonify({'error': 'Check-out date must be after check-in date'}), 400
+        
+        if checkin_date < datetime.now().date():
+            return jsonify({'error': 'Check-in date cannot be in the past'}), 400
+            
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+    
+    # Search hotels using multi-platform approach
+    try:
+        result = api_manager.search_hotels_multi_source(
+            city, checkin, checkout, adults, rooms, room_type
+        )
+        
+        # Enhanced response with room type information
+        enhanced_result = {
+            'city': result['city'],
+            'hotels': result['hotels'],
+            'total_found': result['total_found'],
+            'search_params': {
+                'city': city,
+                'checkin': checkin,
+                'checkout': checkout,
+                'adults': adults,
+                'rooms': rooms,
+                'room_type': room_type
+            },
+            'room_filter': {
+                'enabled': True,
+                'selected_type': ROOM_TYPES[room_type]['name'],
+                'description': ROOM_TYPES[room_type]['description'],
+                'guests': ROOM_TYPES[room_type]['guests']
+            },
+            'api_info': {
+                'source': result['source'],
+                'version': '2.0',
+                'cached': 'cache_hit' if result.get('cached') else 'fresh_data',
+                'localization': 'enabled',
+                'url_type': 'hotel_name_based_with_room_filter'
+            },
+            'test_mode': True,
+            'test_description': 'Stockholm Junior Suite demonstration'
         }
-    })
-
-@app.route('/api/health')
-def health_check():
-    """Health check endpoint for monitoring"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'version': '2.0',
-        'services': {
-            'booking_api': 'operational',
-            'cache_system': 'operational',
-            'demo_fallback': 'operational'
-        }
-    })
-
-@app.errorhandler(404)
-def not_found(error):
-    """Custom 404 handler"""
-    return jsonify({
-        'error': 'Endpoint not found',
-        'available_endpoints': [
-            '/api/hotels',
-            '/api/cities', 
-            '/api/room-types',
-            '/api/analytics',
-            '/api/health',
-            '/test'
-        ]
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    """Custom 500 handler"""
-    return jsonify({
-        'error': 'Internal server error',
-        'fallback': 'Demo data available via /test endpoint',
-        'support': 'Contact support if issue persists'
-    }), 500
-
-# =============================================================================
-# APPLICATION STARTUP
-# =============================================================================
-
-if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend v2.0...")
-    print("🏨 Supporting 29 European cities with 5 room types")
-    print("🌟 NEW: Junior Suite support with enhanced descriptions")
-    print("🔄 Multi-platform API integration with intelligent fallback")
-    print("💾 15-minute caching for optimal performance")
-    print("🌍 Localized booking URLs for all European countries")
-    print("🔗 Frontend connects to this backend")
-    print("📋 Test API: /test (Junior Suite demo)")
-    print("📊 Analytics: /api/analytics")
-    print("❤️  Health check: /api/health")
-    print("✅ Production-ready architecture activated")
-    
-    # Use PORT environment variable for deployment (Render, Heroku, etc.)
-    port = int(os.environ.get('PORT', 5000))
-    
-    # Production vs Development settings
-    if os.environ.get('FLASK_ENV') == 'production':
-        app.run(host='0.0.0.0', port=port, debug=False)
-    else:
-        app.run(host='0.0.0.0', port=port, debug=True)
+        
+        return jsonify(enhanced_result)
+        
+    except Exception as e:
+        return jsonify({
+            'error': 'Search failed',
+            'message': str(e),
+            'fallback': 'demo_data_available',
+            'test_mode': True
+        }), 500
