@@ -345,7 +345,7 @@ def validate_search_params(args):
         checkin = datetime.strptime(args.get('checkin', ''), '%Y-%m-%d')
         checkout = datetime.strptime(args.get('checkout', ''), '%Y-%m-%d')
         
-        if checkin < datetime.now().date():
+        if checkin.date() < datetime.now().date():
             errors.append("Check-in date cannot be in the past")
         if checkout <= checkin:
             errors.append("Check-out must be after check-in")
