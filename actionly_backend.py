@@ -862,4 +862,4 @@ def debug_hotels_com_fixed():
     
     return jsonify(debug_info)
 
-@
+@app.route('/')
