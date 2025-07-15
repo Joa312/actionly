@@ -427,8 +427,437 @@ def get_tripadvisor_reviews(hotel_name, city_name):
     }
 
 # 🔍 ROBUST HOTEL SEARCH SERVICE
+# STAYFINDR BACKEND - Professional Production-Ready Architecture
+# Multi-platform integration with robust error handling and caching
+# Combines proven APIs with modern Python patterns
+
+import os
+import json
+import time
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
+import requests
+from urllib.parse import urlencode, quote_plus
+from functools import wraps
+
+# ⚙️ CONFIGURATION MANAGEMENT
+class Config:
+    """Centralized configuration with environment variable support"""
+    DEBUG = os.getenv("FLASK_ENV", "production") == "development"
+    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999")
+    
+    # API Hosts
+    BOOKING_HOST = "booking-com18.p.rapidapi.com"
+    TRIPADVISOR_HOST = "tripadvisor16.p.rapidapi.com" 
+    XOTELO_HOST = "xotelo-booking-com-alternative.p.rapidapi.com"
+    
+    # Performance settings
+    API_TIMEOUT = int(os.getenv("API_TIMEOUT", "15"))
+    CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))  # 1 hour
+    MAX_HOTELS = int(os.getenv("MAX_HOTELS", "50"))
+
+# 🏗️ APP FACTORY PATTERN
+def create_app():
+    """Create and configure Flask app with professional setup"""
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    CORS(app)
+    
+    # Simple in-memory cache (Redis alternative for simplicity)
+    app.cache = {}
+    
+    return app
+
+app = create_app()
+
+# 🌍 COMPREHENSIVE CITIES DATABASE
+CITIES = {
+    'stockholm': {
+        'name': 'Stockholm, Sweden',
+        'coordinates': [59.3293, 18.0686],
+        'search_query': 'Stockholm Sweden',
+        'location_id': '2163738',  # Booking.com location ID
+        'tripadvisor_id': '189852'
+    },
+    'paris': {
+        'name': 'Paris, France', 
+        'coordinates': [48.8566, 2.3522],
+        'search_query': 'Paris France',
+        'location_id': '20033173',
+        'tripadvisor_id': '187147'
+    },
+    'london': {
+        'name': 'London, UK',
+        'coordinates': [51.5074, -0.1278],
+        'search_query': 'London United Kingdom',
+        'location_id': '20012194',
+        'tripadvisor_id': '186338'
+    },
+    'amsterdam': {
+        'name': 'Amsterdam, Netherlands',
+        'coordinates': [52.3676, 4.9041],
+        'search_query': 'Amsterdam Netherlands',
+        'location_id': '20012505',
+        'tripadvisor_id': '188590'
+    },
+    'barcelona': {
+        'name': 'Barcelona, Spain',
+        'coordinates': [41.3851, 2.1734],
+        'search_query': 'Barcelona Spain',
+        'location_id': '20012565',
+        'tripadvisor_id': '187497'
+    },
+    'rome': {
+        'name': 'Rome, Italy',
+        'coordinates': [41.9028, 12.4964],
+        'search_query': 'Rome Italy',
+        'location_id': '20012816',
+        'tripadvisor_id': '187791'
+    },
+    'berlin': {
+        'name': 'Berlin, Germany',
+        'coordinates': [52.5200, 13.4050],
+        'search_query': 'Berlin Germany',
+        'location_id': '20012426',
+        'tripadvisor_id': '187323'
+    },
+    'copenhagen': {
+        'name': 'Copenhagen, Denmark',
+        'coordinates': [55.6761, 12.5683],
+        'search_query': 'Copenhagen Denmark',
+        'location_id': '20012582',
+        'tripadvisor_id': '189541'
+    },
+    'vienna': {
+        'name': 'Vienna, Austria',
+        'coordinates': [48.2082, 16.3738],
+        'search_query': 'Vienna Austria',
+        'location_id': '20012568',
+        'tripadvisor_id': '190454'
+    },
+    'prague': {
+        'name': 'Prague, Czech Republic',
+        'coordinates': [50.0755, 14.4378],
+        'search_query': 'Prague Czech Republic',
+        'location_id': '20012717',
+        'tripadvisor_id': '274707'
+    },
+    'madrid': {
+        'name': 'Madrid, Spain',
+        'coordinates': [40.4168, -3.7038],
+        'search_query': 'Madrid Spain',
+        'location_id': '20012809',
+        'tripadvisor_id': '187514'
+    },
+    'milano': {
+        'name': 'Milano, Italy',
+        'coordinates': [45.4642, 9.1900],
+        'search_query': 'Milano Italy',
+        'location_id': '20012817',
+        'tripadvisor_id': '187849'
+    },
+    'zurich': {
+        'name': 'Zürich, Switzerland',
+        'coordinates': [47.3769, 8.5417],
+        'search_query': 'Zürich Switzerland',
+        'location_id': '20012839',
+        'tripadvisor_id': '188113'
+    },
+    'oslo': {
+        'name': 'Oslo, Norway',
+        'coordinates': [59.9139, 10.7522],
+        'search_query': 'Oslo Norway',
+        'location_id': '20012821',
+        'tripadvisor_id': '190479'
+    },
+    'helsinki': {
+        'name': 'Helsinki, Finland',
+        'coordinates': [60.1695, 24.9354],
+        'search_query': 'Helsinki Finland',
+        'location_id': '20012650',
+        'tripadvisor_id': '189934'
+    },
+    'warsaw': {
+        'name': 'Warsaw, Poland',
+        'coordinates': [52.2297, 21.0122],
+        'search_query': 'Warsaw Poland',
+        'location_id': '20012834',
+        'tripadvisor_id': '274856'
+    },
+    'budapest': {
+        'name': 'Budapest, Hungary',
+        'coordinates': [47.4979, 19.0402],
+        'search_query': 'Budapest Hungary',
+        'location_id': '20012693',
+        'tripadvisor_id': '274887'
+    },
+    'dublin': {
+        'name': 'Dublin, Ireland',
+        'coordinates': [53.3498, -6.2603],
+        'search_query': 'Dublin Ireland',
+        'location_id': '20012629',
+        'tripadvisor_id': '186605'
+    },
+    'lisbon': {
+        'name': 'Lisbon, Portugal',
+        'coordinates': [38.7223, -9.1393],
+        'search_query': 'Lisbon Portugal',
+        'location_id': '20012800',
+        'tripadvisor_id': '189158'
+    },
+    'brussels': {
+        'name': 'Brussels, Belgium',
+        'coordinates': [50.8503, 4.3517],
+        'search_query': 'Brussels Belgium',
+        'location_id': '20012508',
+        'tripadvisor_id': '188057'
+    },
+    'athens': {
+        'name': 'Athens, Greece',
+        'coordinates': [37.9838, 23.7275],
+        'search_query': 'Athens Greece',
+        'location_id': '20012681',
+        'tripadvisor_id': '189398'
+    },
+    'munich': {
+        'name': 'Munich, Germany',
+        'coordinates': [48.1351, 11.5820],
+        'search_query': 'Munich Germany',
+        'location_id': '20012428',
+        'tripadvisor_id': '187309'
+    },
+    'lyon': {
+        'name': 'Lyon, France',
+        'coordinates': [45.7640, 4.8357],
+        'search_query': 'Lyon France',
+        'location_id': '20012638',
+        'tripadvisor_id': '187265'
+    },
+    'florence': {
+        'name': 'Florence, Italy',
+        'coordinates': [43.7696, 11.2558],
+        'search_query': 'Florence Italy',
+        'location_id': '20012823',
+        'tripadvisor_id': '187895'
+    },
+    'edinburgh': {
+        'name': 'Edinburgh, Scotland',
+        'coordinates': [55.9533, -3.1883],
+        'search_query': 'Edinburgh Scotland',
+        'location_id': '20012196',
+        'tripadvisor_id': '186525'
+    },
+    'nice': {
+        'name': 'Nice, France',
+        'coordinates': [43.7102, 7.2620],
+        'search_query': 'Nice France',
+        'location_id': '20012641',
+        'tripadvisor_id': '187982'
+    },
+    'palma': {
+        'name': 'Palma, Spain',
+        'coordinates': [39.5696, 2.6502],
+        'search_query': 'Palma Spain',
+        'location_id': '20012813',
+        'tripadvisor_id': '187462'
+    },
+    'santorini': {
+        'name': 'Santorini, Greece',
+        'coordinates': [36.3932, 25.4615],
+        'search_query': 'Santorini Greece',
+        'location_id': '20012683',
+        'tripadvisor_id': '189449'
+    },
+    'ibiza': {
+        'name': 'Ibiza, Spain',
+        'coordinates': [38.9067, 1.4206],
+        'search_query': 'Ibiza Spain',
+        'location_id': '20012814',
+        'tripadvisor_id': '187463'
+    }
+}
+
+# 🏨 COMPREHENSIVE ROOM TYPES WITH JUNIOR SUITE
+ROOM_TYPES = {
+    'single': {
+        'name': 'Single Room',
+        'guests': 1,
+        'description': 'Single Room - Perfect for solo travelers',
+        'keywords': ['single', 'solo', 'one person', 'individual'],
+        'booking_param': 'single'
+    },
+    'double': {
+        'name': 'Double Room', 
+        'guests': 2,
+        'description': 'Double Room - Ideal for couples',
+        'keywords': ['double', 'twin', 'couple', 'two people'],
+        'booking_param': 'double'
+    },
+    'family': {
+        'name': 'Family Room',
+        'guests': 4,
+        'description': 'Family Room - Spacious for families (3-4 guests)',
+        'keywords': ['family', 'connecting', 'adjoining', 'kids', 'children'],
+        'booking_param': 'family'
+    },
+    'junior_suite': {
+        'name': 'Junior Suite',
+        'guests': 2,
+        'description': 'Junior Suite - Spacious room with sitting area',
+        'keywords': ['junior suite', 'junior', 'suite', 'sitting area', 'upgraded', 'premium'],
+        'booking_param': 'junior_suite'
+    },
+    'suite': {
+        'name': 'Suite/Apartment',
+        'guests': 3,
+        'description': 'Suite/Apartment - Luxury accommodation with separate living area',
+        'keywords': ['suite', 'apartment', 'presidential', 'luxury', 'living room', 'kitchenette'],
+        'booking_param': 'suite'
+    }
+}
+
+# 🌍 LOCALIZED COUNTRY CODES
+COUNTRY_CODES = {
+    'stockholm': 'sv', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
+    'paris': 'fr', 'lyon': 'fr', 'nice': 'fr',
+    'london': 'en-gb', 'edinburgh': 'en-gb',
+    'amsterdam': 'nl', 'brussels': 'nl',
+    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es',
+    'rome': 'it', 'milano': 'it', 'florence': 'it',
+    'berlin': 'de', 'munich': 'de',
+    'vienna': 'de', 'zurich': 'de',
+    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu',
+    'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
+}
+
+# 🧠 INTELLIGENT CACHING DECORATOR
+def cache_result(ttl=3600):
+    """Decorator for caching API results with TTL"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Create cache key from function name and arguments
+            cache_key = f"{func.__name__}:{hash(str(args) + str(kwargs))}"
+            
+            # Check if result is in cache and still valid
+            if cache_key in app.cache:
+                cached_data, timestamp = app.cache[cache_key]
+                if time.time() - timestamp < ttl:
+                    return cached_data
+            
+            # Call function and cache result
+            result = func(*args, **kwargs)
+            app.cache[cache_key] = (result, time.time())
+            
+            # Clean old cache entries (simple cleanup)
+            if len(app.cache) > 1000:
+                oldest_key = min(app.cache.keys(), key=lambda k: app.cache[k][1])
+                del app.cache[oldest_key]
+            
+            return result
+        return wrapper
+    return decorator
+
+# 🔍 INPUT VALIDATION
+def validate_search_params(args):
+    """Validate and sanitize search parameters"""
+    errors = []
+    
+    # Required parameters
+    city = args.get('city', '').lower().strip()
+    if not city or city not in CITIES:
+        errors.append(f"Invalid city. Supported: {list(CITIES.keys())}")
+    
+    # Date validation
+    try:
+        checkin = datetime.strptime(args.get('checkin', ''), '%Y-%m-%d')
+        checkout = datetime.strptime(args.get('checkout', ''), '%Y-%m-%d')
+        
+        if checkin.date() < datetime.now().date():
+            errors.append("Check-in date cannot be in the past")
+        if checkout <= checkin:
+            errors.append("Check-out must be after check-in")
+        if (checkout - checkin).days > 30:
+            errors.append("Stay cannot exceed 30 days")
+            
+    except ValueError:
+        errors.append("Invalid date format. Use YYYY-MM-DD")
+        checkin = checkout = None
+    
+    # Numeric validation
+    try:
+        adults = int(args.get('adults', 2))
+        rooms = int(args.get('rooms', 1))
+        if adults < 1 or adults > 10:
+            errors.append("Adults must be between 1 and 10")
+        if rooms < 1 or rooms > 5:
+            errors.append("Rooms must be between 1 and 5")
+    except ValueError:
+        errors.append("Adults and rooms must be valid numbers")
+        adults = rooms = None
+    
+    # Room type validation
+    room_type = args.get('room_type', 'double')
+    if room_type not in ROOM_TYPES:
+        errors.append(f"Invalid room type. Supported: {list(ROOM_TYPES.keys())}")
+    
+    if errors:
+        return None, errors
+    
+    return {
+        'city': city,
+        'checkin': checkin,
+        'checkout': checkout,
+        'adults': adults,
+        'rooms': rooms,
+        'room_type': room_type
+    }, []
+
+# 🏆 TRIPADVISOR SERVICE WITH CACHING
+@cache_result(ttl=3600)  # Cache for 1 hour
+def get_tripadvisor_reviews(hotel_name, city_name):
+    """Get TripAdvisor reviews with intelligent caching"""
+    url = f"https://{app.config['TRIPADVISOR_HOST']}/api/v1/hotels/searchHotels"
+    
+    headers = {
+        "x-rapidapi-key": app.config['RAPIDAPI_KEY'],
+        "x-rapidapi-host": app.config['TRIPADVISOR_HOST']
+    }
+    
+    params = {
+        "query": f"{hotel_name} {city_name}",
+        "page": "1"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=app.config['API_TIMEOUT'])
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and data['data']:
+                hotel_data = data['data'][0]
+                return {
+                    'rating': hotel_data.get('rating', 4.0),
+                    'review_count': hotel_data.get('reviewCount', 0),
+                    'price_level': hotel_data.get('priceLevel', '$'),
+                    'ranking': hotel_data.get('ranking'),
+                    'tripadvisor_url': hotel_data.get('detailUrl', '')
+                }
+    except Exception as e:
+        print(f"TripAdvisor API error: {e}")
+    
+    # Fallback data
+    return {
+        'rating': 4.0,
+        'review_count': 0,
+        'price_level': '$',
+        'ranking': None,
+        'tripadvisor_url': ''
+    }
+
+# 🔍 ROBUST HOTEL SEARCH SERVICE WITH DEMO FALLBACK
 def search_hotels_with_fallback(city_info, checkin, checkout, adults, rooms):
-    """Multi-tier hotel search with intelligent fallback"""
+    """Multi-tier hotel search with intelligent fallback including demo data"""
     
     # Primary: Booking.com API (most reliable)
     try:
@@ -485,7 +914,62 @@ def search_hotels_with_fallback(city_info, checkin, checkout, adults, rooms):
     except Exception as e:
         print(f"Xotelo API error: {e}")
     
-    return None, None
+    # Final Fallback: Demo data to ensure app always works
+    print(f"Using demo data for {city_info['name']}")
+    
+    demo_hotels = {
+        'stockholm': [
+            {
+                'id': '2163738', 'name': 'Hotel Diplomat Stockholm', 'address': 'Strandvägen 7C, Stockholm',
+                'latitude': 59.3326, 'longitude': 18.0649,
+                'priceBreakdown': {'grossPrice': {'value': 2400}},
+                'rating': 4.3, 'description': 'Luxury hotel overlooking the waterfront'
+            },
+            {
+                'id': '4635556', 'name': 'Scandic Continental', 'address': 'Vasagatan 22, Stockholm',
+                'latitude': 59.3293, 'longitude': 18.0686,
+                'priceBreakdown': {'grossPrice': {'value': 1800}},
+                'rating': 4.1, 'description': 'Modern hotel in city center'
+            },
+            {
+                'id': '1847562', 'name': 'Hotel Birger Jarl', 'address': 'Tulegatan 8, Stockholm',
+                'latitude': 59.3370, 'longitude': 18.0581,
+                'priceBreakdown': {'grossPrice': {'value': 1650}},
+                'rating': 4.0, 'description': 'Boutique hotel in Östermalm'
+            },
+            {
+                'id': '9456123', 'name': 'Grand Hôtel Stockholm', 'address': 'Södra Blasieholmshamnen 8',
+                'latitude': 59.3299, 'longitude': 18.0732,
+                'priceBreakdown': {'grossPrice': {'value': 4200}},
+                'rating': 4.6, 'description': 'Historic luxury hotel with Nobel Prize connections'
+            },
+            {
+                'id': '7834567', 'name': 'Clarion Hotel Sign', 'address': 'Östra Järnvägsgatan 35',
+                'latitude': 59.3344, 'longitude': 18.0572,
+                'priceBreakdown': {'grossPrice': {'value': 2100}},
+                'rating': 4.2, 'description': 'Contemporary design hotel'
+            }
+        ],
+        'paris': [
+            {
+                'id': '13881964', 'name': 'Hotel des Grands Boulevards', 'address': '17 Boulevard Poissonnière, Paris',
+                'latitude': 48.8708, 'longitude': 2.3445,
+                'priceBreakdown': {'grossPrice': {'value': 280}},
+                'rating': 4.4, 'description': 'Boutique hotel in historic Paris'
+            },
+            {
+                'id': '15678234', 'name': 'Hotel Malte Opera', 'address': '63 Rue de Richelieu, Paris',
+                'latitude': 48.8675, 'longitude': 2.3372,
+                'priceBreakdown': {'grossPrice': {'value': 220}},
+                'rating': 4.2, 'description': 'Charming hotel near Opera'
+            }
+        ]
+    }
+    
+    city_key = city_info['name'].split(',')[0].lower()
+    hotels_for_city = demo_hotels.get(city_key, demo_hotels['stockholm'])
+    
+    return {'data': hotels_for_city}, 'demo_data'
 
 # 🔗 SMART BOOKING URL GENERATOR
 def create_optimized_booking_url(hotel, city_key, checkin, checkout, adults, rooms, room_type='double'):
