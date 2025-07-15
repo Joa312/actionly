@@ -1,6 +1,6 @@
 # STAYFINDR BACKEND - European Hotel Search Engine
 # Flask backend with Booking.com + WORKING Hotels.com API integration
-# FIXED: Correct Hotels.com endpoints based on research
+# FIXED: Complete implementation with room type filters and Junior Suite
 
 import os
 from flask import Flask, request, jsonify, render_template_string
@@ -271,8 +271,8 @@ def get_location_id_booking(city_query):
     
     return None
 
-def get_hotels_com_region_id_fixed(city_name):
-    """Get Hotels.com region ID using CORRECT locations/search endpoint"""
+def get_hotels_com_region_id(city_name):
+    """Get Hotels.com region ID using correct locations/search endpoint"""
     url = "https://hotels4.p.rapidapi.com/locations/search"
     
     querystring = {
@@ -287,13 +287,10 @@ def get_hotels_com_region_id_fixed(city_name):
     
     try:
         response = requests.get(url, headers=headers, params=querystring)
-        print(f"🔍 Hotels.com locations/search response: {response.status_code}")
-        
         if response.status_code == 200:
             data = response.json()
-            print(f"🔍 Response data keys: {list(data.keys()) if data else 'None'}")
             
-            # Look for suggestions array (common in Hotels.com API)
+            # Look for suggestions array
             if 'suggestions' in data:
                 for suggestion in data['suggestions']:
                     if suggestion.get('group') == 'CITY_GROUP':
@@ -304,28 +301,12 @@ def get_hotels_com_region_id_fixed(city_name):
                                 if destination_id:
                                     return destination_id
                                     
-            # Alternative: look for sr array (similar to v3 structure)
+            # Alternative: look for sr array
             if 'sr' in data:
                 for location in data['sr']:
                     if location.get('type') == 'CITY' and location.get('gaiaId'):
                         return location['gaiaId']
                         
-            # Another alternative: direct destinationId in results
-            if isinstance(data, dict) and 'destinationId' in data:
-                return data['destinationId']
-                
-            # Last resort: any ID we can find
-            if isinstance(data, list) and data:
-                for item in data:
-                    if isinstance(item, dict):
-                        for key in ['destinationId', 'gaiaId', 'id']:
-                            if key in item:
-                                return item[key]
-                                
-        else:
-            print(f"❌ Hotels.com API error: {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            
     except Exception as e:
         print(f"Error getting Hotels.com region ID: {e}")
     
@@ -358,7 +339,7 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     
     return None
 
-def search_hotels_com_api_fixed(destination_id, checkin, checkout, adults):
+def search_hotels_com_api(destination_id, checkin, checkout, adults):
     """Search hotels using Hotels.com API with correct structure"""
     url = "https://hotels4.p.rapidapi.com/properties/list"
     
@@ -381,8 +362,6 @@ def search_hotels_com_api_fixed(destination_id, checkin, checkout, adults):
     
     try:
         response = requests.get(url, headers=headers, params=querystring)
-        print(f"🔍 Hotels.com properties/list response: {response.status_code}")
-        
         if response.status_code == 200:
             data = response.json()
             return data
@@ -392,7 +371,7 @@ def search_hotels_com_api_fixed(destination_id, checkin, checkout, adults):
     
     return None
 
-def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key):
+def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key, room_type=None):
     """Create hotel name-based booking URL for better targeting"""
     
     # Priority 1: Use direct hotel URL from API if available
@@ -407,10 +386,14 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_
     for url in direct_urls:
         if url and 'booking.com' in str(url):
             # Add search parameters to direct URL
+            params = f"checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+            if room_type and room_type in ROOM_TYPES:
+                params += f"&room_type={ROOM_TYPES[room_type]['booking_param']}"
+            
             if '?' in url:
-                return f"{url}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+                return f"{url}&{params}"
             else:
-                return f"{url}?checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+                return f"{url}?{params}"
     
     # Priority 2: Create hotel name-based search URL
     hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
@@ -419,9 +402,6 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_
     if hotel_id and hotel_name:
         # Get country code for the city
         country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        
-        # Encode hotel name properly for URL
-        hotel_name_encoded = quote_plus(hotel_name)
         
         # Create hotel name-based search URL
         base_params = {
@@ -436,6 +416,10 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_
             'search_selected': 'true'
         }
         
+        # Add room type if specified
+        if room_type and room_type in ROOM_TYPES:
+            base_params['room_type'] = ROOM_TYPES[room_type]['booking_param']
+        
         # Build URL parameters
         params_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in base_params.items()])
         
@@ -444,24 +428,32 @@ def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_
     # Priority 3: Fallback to hotel ID-based URL
     if hotel_id:
         country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        return f"https://www.booking.com/hotel/{country_code.split('-')[0]}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+        params = f"hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+        if room_type and room_type in ROOM_TYPES:
+            params += f"&room_type={ROOM_TYPES[room_type]['booking_param']}"
+        
+        return f"https://www.booking.com/hotel/{country_code.split('-')[0]}/?{params}"
     
     # Priority 4: Generic search by hotel name in the city
     hotel_name = hotel.get('name', '').replace(' ', '+')
     city_name = city_info['name'].replace(' ', '+')
     country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-    return f"https://www.booking.com/searchresults.{country_code}.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    params = f"ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    
+    return f"https://www.booking.com/searchresults.{country_code}.html?{params}"
 
-def create_hotels_com_url(hotel, checkin, checkout, adults, rooms):
+def create_hotels_com_url(hotel, checkin, checkout, adults, rooms, room_type=None):
     """Create Hotels.com booking URL"""
     hotel_id = hotel.get('id') or hotel.get('propertyId')
     
+    params = f"q-check-in={checkin}&q-check-out={checkout}&q-rooms=1&q-room-0-adults={adults}&q-room-0-children=0"
+    
     if hotel_id:
-        return f"https://www.hotels.com/ho{hotel_id}/?q-check-in={checkin}&q-check-out={checkout}&q-rooms=1&q-room-0-adults={adults}&q-room-0-children=0"
+        return f"https://www.hotels.com/ho{hotel_id}/?{params}"
     
     # Fallback to search by hotel name
     hotel_name = hotel.get('name', '').replace(' ', '+')
-    return f"https://www.hotels.com/search.do?q-destination={hotel_name}&q-check-in={checkin}&q-check-out={checkout}&q-rooms=1&q-room-0-adults={adults}"
+    return f"https://www.hotels.com/search.do?q-destination={hotel_name}&{params}"
 
 def analyze_room_type(hotel_name, room_type_filter):
     """Analyze if hotel matches room type criteria"""
@@ -516,7 +508,6 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms,
                     total_price = price_info['value']
                     try:
                         # Estimate per night
-                        from datetime import datetime
                         checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
                         checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
                         nights = (checkout_date - checkin_date).days
@@ -551,9 +542,9 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms,
         
         # Create optimized booking URL
         if platform == 'booking':
-            booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key)
+            booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key, room_type_filter)
         else:
-            booking_url = create_hotels_com_url(hotel, checkin, checkout, adults, rooms)
+            booking_url = create_hotels_com_url(hotel, checkin, checkout, adults, rooms, room_type_filter)
         
         # Add room type information if filtering
         room_type_info = ""
@@ -577,133 +568,7 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms,
     
     return processed_hotels
 
-@app.route('/api/hotels')
-def get_hotels():
-    """Get hotels from both Booking.com and Hotels.com with room type filtering"""
-    city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', '2025-07-15')
-    checkout = request.args.get('checkout', '2025-07-16')
-    adults = request.args.get('adults', '2')
-    rooms = request.args.get('rooms', '1')
-    room_type = request.args.get('room_type', 'double')
-    
-    if city not in CITIES:
-        return jsonify({'error': f'City {city} not supported'}), 400
-    
-    city_info = CITIES[city]
-    all_hotels = []
-    platform_results = {}
-    
-    # Search Booking.com
-    print(f"🔍 Searching Booking.com for {city}")
-    booking_location_id = get_location_id_booking(city_info['search_query'])
-    
-    if booking_location_id:
-        booking_data = search_hotels_booking_api(booking_location_id, checkin, checkout, adults, rooms)
-        if booking_data and 'data' in booking_data:
-            booking_hotels = process_hotel_data(
-                booking_data['data'][:25], 
-                city_info, 
-                checkin, 
-                checkout, 
-                adults, 
-                rooms, 
-                city,
-                room_type,
-                "booking"
-            )
-            all_hotels.extend(booking_hotels)
-            platform_results['booking'] = {
-                'found': len(booking_hotels),
-                'status': 'success'
-            }
-    
-    # Search Hotels.com using FIXED method
-    print(f"🔍 Searching Hotels.com for {city}")
-    hotels_destination_id = get_hotels_com_region_id_fixed(city_info['hotels_search'])
-    
-    if hotels_destination_id:
-        hotels_data = search_hotels_com_api_fixed(hotels_destination_id, checkin, checkout, adults)
-        if hotels_data and 'data' in hotels_data:
-            if 'body' in hotels_data['data'] and 'searchResults' in hotels_data['data']['body']:
-                search_results = hotels_data['data']['body']['searchResults']
-                results = search_results.get('results', [])
-                hotels_com_hotels = process_hotel_data(
-                    results[:25], 
-                    city_info, 
-                    checkin, 
-                    checkout, 
-                    adults, 
-                    rooms, 
-                    city,
-                    room_type,
-                    "hotels.com"
-                )
-                all_hotels.extend(hotels_com_hotels)
-                platform_results['hotels_com'] = {
-                    'found': len(hotels_com_hotels),
-                    'status': 'success'
-                }
-            else:
-                platform_results['hotels_com'] = {
-                    'found': 0,
-                    'status': 'no_results'
-                }
-    else:
-        platform_results['hotels_com'] = {
-            'found': 0,
-            'status': 'no_destination_id'
-        }
-    
-    # Remove duplicates based on hotel name similarity
-    unique_hotels = []
-    seen_names = set()
-    
-    for hotel in all_hotels:
-        hotel_name_clean = hotel['name'].lower().replace(' ', '').replace('-', '')
-        if hotel_name_clean not in seen_names:
-            seen_names.add(hotel_name_clean)
-            unique_hotels.append(hotel)
-    
-    # Add room type information to response
-    room_type_info = ROOM_TYPES.get(room_type, ROOM_TYPES['double'])
-    
-    return jsonify({
-        'city': city_info['name'],
-        'hotels': unique_hotels,
-        'total_found': len(unique_hotels),
-        'platforms': platform_results,
-        'search_params': {
-            'checkin': checkin,
-            'checkout': checkout, 
-            'adults': adults,
-            'rooms': rooms,
-            'room_type': room_type
-        },
-        'room_type_filter': room_type_info,
-        'multiplatform': 'enabled',
-        'hotels_com_fix': 'applied',
-        'booking_optimization': 'enabled',
-        'localization': 'enabled'
-    })
-
-@app.route('/test')
-def test_multiplatform():
-    """Test multiplatform search with Stockholm"""
-    return get_hotels()
-
-if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend...")
-    print("🏨 Supporting 29 European cities")
-    print("🌍 FIXED: Working Hotels.com integration")
-    print("🔗 Frontend will connect to: http://localhost:5000")
-    print("📋 Test API: http://localhost:5000/test")
-    print("🔍 Debug Hotels.com: http://localhost:5000/debug-hotels-com-fixed")
-    print("✅ Multiplatform: Booking.com + Hotels.com (FIXED)")
-    
-    # Use PORT environment variable for deployment (Render, Heroku, etc.)
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)app.route('/')
+@app.route('/')
 def home():
     """API Documentation Page"""
     return render_template_string('''
@@ -722,30 +587,42 @@ def home():
     </head>
     <body>
         <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend for European hotel search with WORKING Hotels.com integration</p>
+        <p>Flask backend for European hotel search with multi-platform integration</p>
         
         <div class="feature">
-            <strong>✅ FIXED: Working Hotels.com Integration!</strong><br>
-            Using correct locations/search endpoint with improved parsing
+            <strong>✅ COMPLETE: Multi-Platform Hotel Search!</strong><br>
+            - Booking.com integration with localized URLs<br>
+            - Hotels.com integration for price comparison<br>
+            - Room type filtering with Junior Suite support<br>
+            - Smart booking URL generation
         </div>
         
         <h2>Available endpoints:</h2>
         <div class="endpoint">
             <strong>/api/hotels</strong> - Get hotels from both platforms<br>
             Parameters: city, checkin, checkout, adults, rooms, room_type<br>
-            <em>Now with WORKING Hotels.com integration</em>
+            <em>Returns combined results from Booking.com and Hotels.com</em>
         </div>
         <div class="endpoint">
-            <strong>/debug-hotels-com-fixed</strong> - Fixed Hotels.com debug
-        </div>
-        <div class="endpoint">
-            <strong>/api/cities</strong> - List all 29 cities
+            <strong>/api/cities</strong> - List all 29 European cities
         </div>
         <div class="endpoint">
             <strong>/api/room-types</strong> - List room types including Junior Suite
         </div>
         <div class="endpoint">
-            <strong>/test</strong> - Test multiplatform search
+            <strong>/test</strong> - Test multiplatform search (Stockholm)
+        </div>
+        <div class="endpoint">
+            <strong>/debug-multiplatform</strong> - Debug both API integrations
+        </div>
+        
+        <h2>Room Types Available:</h2>
+        <div class="cities">
+            <div class="city">Single Room</div>
+            <div class="city">Double Room</div>
+            <div class="city">Family Room</div>
+            <div class="city">Junior Suite</div>
+            <div class="city">Suite/Apartment</div>
         </div>
         
         <h2>Cities supported:</h2>
@@ -775,91 +652,185 @@ def get_room_types():
         'junior_suite_included': True
     })
 
-@app.route('/debug-hotels-com-fixed')
-def debug_hotels_com_fixed():
-    """Fixed Hotels.com debug with correct endpoints"""
+@app.route('/api/hotels')
+def get_hotels():
+    """Get hotels from multiple platforms with room type filtering"""
+    city = request.args.get('city', 'stockholm')
+    checkin = request.args.get('checkin', '2025-07-15')
+    checkout = request.args.get('checkout', '2025-07-16')
+    adults = request.args.get('adults', '2')
+    rooms = request.args.get('rooms', '1')
+    room_type = request.args.get('room_type', 'double')
+    
+    if city not in CITIES:
+        return jsonify({'error': f'City {city} not supported'}), 400
+    
+    city_info = CITIES[city]
+    all_hotels = []
+    
+    # Search Booking.com
+    booking_location_id = get_location_id_booking(city_info['search_query'])
+    if booking_location_id:
+        booking_data = search_hotels_booking_api(booking_location_id, checkin, checkout, adults, rooms)
+        if booking_data and 'data' in booking_data:
+            booking_hotels = process_hotel_data(
+                booking_data['data'][:25], 
+                city_info, 
+                checkin, 
+                checkout, 
+                adults, 
+                rooms, 
+                city, 
+                room_type, 
+                "booking"
+            )
+            all_hotels.extend(booking_hotels)
+    
+    # Search Hotels.com
+    hotels_destination_id = get_hotels_com_region_id(city_info['hotels_search'])
+    if hotels_destination_id:
+        hotels_data = search_hotels_com_api(hotels_destination_id, checkin, checkout, adults)
+        if hotels_data and 'data' in hotels_data:
+            try:
+                search_results = hotels_data['data']['body'].get('searchResults', {})
+                results = search_results.get('results', [])
+                hotels_com_hotels = process_hotel_data(
+                    results[:25], 
+                    city_info, 
+                    checkin, 
+                    checkout, 
+                    adults, 
+                    rooms, 
+                    city, 
+                    room_type, 
+                    "hotels_com"
+                )
+                all_hotels.extend(hotels_com_hotels)
+            except Exception as e:
+                print(f"Error processing Hotels.com data: {e}")
+    
+    # Sort by price (convert N/A to high number for sorting)
+    def price_sort_key(hotel):
+        if hotel['price'] == 'N/A':
+            return 999999
+        return hotel['price']
+    
+    all_hotels.sort(key=price_sort_key)
+    
+    # Limit to top 50 results
+    final_hotels = all_hotels[:50]
+    
+    return jsonify({
+        'city': city_info['name'],
+        'hotels': final_hotels,
+        'total_found': len(final_hotels),
+        'platforms': ['Booking.com', 'Hotels.com'],
+        'search_params': {
+            'checkin': checkin,
+            'checkout': checkout, 
+            'adults': adults,
+            'rooms': rooms,
+            'room_type': room_type
+        },
+        'room_filter': 'enabled',
+        'room_type': room_type,
+        'room_description': ROOM_TYPES.get(room_type, {}).get('description', 'Standard room'),
+        'multiplatform': 'enabled',
+        'url_type': 'hotel_name_based'
+    })
+
+@app.route('/test')
+def test_multiplatform():
+    """Test endpoint with Stockholm hotels from both platforms"""
+    return get_hotels()
+
+@app.route('/debug-multiplatform')
+def debug_multiplatform():
+    """Debug both Booking.com and Hotels.com integrations"""
     city = 'Stockholm'
     checkin = '2025-07-15'
     checkout = '2025-07-16'
     adults = 2
     
     debug_info = {
-        'fix_applied': 'Using locations/search instead of locations/v3/search',
-        'research_source': 'Hotels.com API discussions on RapidAPI',
         'test_parameters': {
             'city': city,
             'checkin': checkin,
             'checkout': checkout,
             'adults': adults
-        }
+        },
+        'platforms_tested': ['Booking.com', 'Hotels.com']
     }
     
-    # Step 1: Get destination ID using CORRECT endpoint
-    print(f"🔍 Step 1: Getting Hotels.com destination ID for {city}")
-    destination_id = get_hotels_com_region_id_fixed(city)
+    # Test Booking.com
+    print(f"🔍 Testing Booking.com for {city}")
+    booking_location_id = get_location_id_booking(f"{city} Sweden")
     
-    debug_info['step_1_location_search'] = {
-        'endpoint': 'locations/search (FIXED)',
-        'city_searched': city,
-        'destination_id_found': destination_id,
-        'success': destination_id is not None
+    debug_info['booking_com'] = {
+        'location_id_found': booking_location_id,
+        'success': booking_location_id is not None
     }
     
-    if not destination_id:
-        debug_info['final_analysis'] = {
-            'overall_success': False,
-            'step1_success': False,
-            'step2_success': False,
-            'hotels_found': 0,
-            'error': 'Could not find destination ID for Stockholm using fixed endpoint'
-        }
-        return jsonify(debug_info)
-    
-    # Step 2: Search hotels using properties/list endpoint
-    print(f"🔍 Step 2: Searching hotels with destination ID {destination_id}")
-    hotels_data = search_hotels_com_api_fixed(destination_id, checkin, checkout, adults)
-    
-    debug_info['step_2_hotels_search'] = {
-        'endpoint': 'properties/list',
-        'method': 'GET with querystring',
-        'destination_id_used': destination_id,
-        'response_received': hotels_data is not None,
-        'success': hotels_data is not None
-    }
-    
-    if hotels_data:
-        # Extract hotels from response
-        hotels = []
-        if 'data' in hotels_data and 'body' in hotels_data['data']:
-            search_results = hotels_data['data']['body'].get('searchResults', {})
-            results = search_results.get('results', [])
-            hotels = results[:10]  # Limit to 10 for debug
-            
-            debug_info['step_2_hotels_search']['hotels_found'] = len(hotels)
-            debug_info['step_2_hotels_search']['sample_hotels'] = [
+    if booking_location_id:
+        booking_data = search_hotels_booking_api(booking_location_id, checkin, checkout, adults, 1)
+        if booking_data and 'data' in booking_data:
+            debug_info['booking_com']['hotels_found'] = len(booking_data['data'])
+            debug_info['booking_com']['sample_hotels'] = [
                 {
                     'name': hotel.get('name', 'N/A'),
-                    'id': hotel.get('id', 'N/A'),
-                    'price': hotel.get('ratePlan', {}).get('price', {}).get('current', 'N/A')
-                } for hotel in hotels[:3]
+                    'price': hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value', 'N/A')
+                } for hotel in booking_data['data'][:3]
             ]
-        
-        debug_info['final_analysis'] = {
-            'overall_success': len(hotels) > 0,
-            'step1_success': True,
-            'step2_success': True,
-            'hotels_found': len(hotels),
-            'fix_worked': len(hotels) > 0
-        }
-    else:
-        debug_info['final_analysis'] = {
-            'overall_success': False,
-            'step1_success': True,
-            'step2_success': False,
-            'hotels_found': 0,
-            'error': 'Hotels search returned null despite valid destination ID'
-        }
+    
+    # Test Hotels.com
+    print(f"🔍 Testing Hotels.com for {city}")
+    hotels_destination_id = get_hotels_com_region_id(city)
+    
+    debug_info['hotels_com'] = {
+        'destination_id_found': hotels_destination_id,
+        'success': hotels_destination_id is not None
+    }
+    
+    if hotels_destination_id:
+        hotels_data = search_hotels_com_api(hotels_destination_id, checkin, checkout, adults)
+        if hotels_data and 'data' in hotels_data:
+            try:
+                search_results = hotels_data['data']['body'].get('searchResults', {})
+                results = search_results.get('results', [])
+                debug_info['hotels_com']['hotels_found'] = len(results)
+                debug_info['hotels_com']['sample_hotels'] = [
+                    {
+                        'name': hotel.get('name', 'N/A'),
+                        'price': hotel.get('ratePlan', {}).get('price', {}).get('current', 'N/A')
+                    } for hotel in results[:3]
+                ]
+            except Exception as e:
+                debug_info['hotels_com']['error'] = str(e)
+    
+    # Final analysis
+    booking_success = debug_info['booking_com']['success']
+    hotels_success = debug_info['hotels_com']['success']
+    
+    debug_info['final_analysis'] = {
+        'overall_success': booking_success and hotels_success,
+        'booking_com_working': booking_success,
+        'hotels_com_working': hotels_success,
+        'multiplatform_ready': booking_success and hotels_success,
+        'total_platforms': 2 if booking_success and hotels_success else (1 if booking_success or hotels_success else 0)
+    }
     
     return jsonify(debug_info)
 
-@app.route('/')
+if __name__ == '__main__':
+    print("🚀 Starting STAYFINDR Backend...")
+    print("🏨 Supporting 29 European cities")
+    print("🌍 Multi-platform: Booking.com + Hotels.com")
+    print("🛏️ Room types: Single, Double, Family, Junior Suite, Suite")
+    print("🔗 Frontend will connect to: http://localhost:5000")
+    print("📋 Test API: http://localhost:5000/test")
+    print("🔍 Debug: http://localhost:5000/debug-multiplatform")
+    print("✅ Complete hotel search solution ready!")
+    
+    # Use PORT environment variable for deployment (Render, Heroku, etc.)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
