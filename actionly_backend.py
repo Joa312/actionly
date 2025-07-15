@@ -48,7 +48,162 @@ CITIES = {
         'search_query': 'Paris France',
         'country': 'fr'
     },
-    # ... (rest of the cities remain unchanged) ...
+    'london': {
+        'name': 'London, UK',
+        'coordinates': [51.5074, -0.1278],
+        'search_query': 'London United Kingdom',
+        'country': 'gb'
+    },
+    'amsterdam': {
+        'name': 'Amsterdam, Netherlands',
+        'coordinates': [52.3676, 4.9041],
+        'search_query': 'Amsterdam Netherlands',
+        'country': 'nl'
+    },
+    'barcelona': {
+        'name': 'Barcelona, Spain',
+        'coordinates': [41.3851, 2.1734],
+        'search_query': 'Barcelona Spain',
+        'country': 'es'
+    },
+    'rome': {
+        'name': 'Rome, Italy',
+        'coordinates': [41.9028, 12.4964],
+        'search_query': 'Rome Italy',
+        'country': 'it'
+    },
+    'berlin': {
+        'name': 'Berlin, Germany',
+        'coordinates': [52.5200, 13.4050],
+        'search_query': 'Berlin Germany',
+        'country': 'de'
+    },
+    'copenhagen': {
+        'name': 'Copenhagen, Denmark',
+        'coordinates': [55.6761, 12.5683],
+        'search_query': 'Copenhagen Denmark',
+        'country': 'dk'
+    },
+    'vienna': {
+        'name': 'Vienna, Austria',
+        'coordinates': [48.2082, 16.3738],
+        'search_query': 'Vienna Austria',
+        'country': 'at'
+    },
+    'prague': {
+        'name': 'Prague, Czech Republic',
+        'coordinates': [50.0755, 14.4378],
+        'search_query': 'Prague Czech Republic',
+        'country': 'cz'
+    },
+    'madrid': {
+        'name': 'Madrid, Spain',
+        'coordinates': [40.4168, -3.7038],
+        'search_query': 'Madrid Spain',
+        'country': 'es'
+    },
+    'milano': {
+        'name': 'Milano, Italy',
+        'coordinates': [45.4642, 9.1900],
+        'search_query': 'Milano Italy',
+        'country': 'it'
+    },
+    'zurich': {
+        'name': 'Zürich, Switzerland',
+        'coordinates': [47.3769, 8.5417],
+        'search_query': 'Zürich Switzerland',
+        'country': 'ch'
+    },
+    'oslo': {
+        'name': 'Oslo, Norway',
+        'coordinates': [59.9139, 10.7522],
+        'search_query': 'Oslo Norway',
+        'country': 'no'
+    },
+    'helsinki': {
+        'name': 'Helsinki, Finland',
+        'coordinates': [60.1695, 24.9354],
+        'search_query': 'Helsinki Finland',
+        'country': 'fi'
+    },
+    'warsaw': {
+        'name': 'Warsaw, Poland',
+        'coordinates': [52.2297, 21.0122],
+        'search_query': 'Warsaw Poland',
+        'country': 'pl'
+    },
+    'budapest': {
+        'name': 'Budapest, Hungary',
+        'coordinates': [47.4979, 19.0402],
+        'search_query': 'Budapest Hungary',
+        'country': 'hu'
+    },
+    'dublin': {
+        'name': 'Dublin, Ireland',
+        'coordinates': [53.3498, -6.2603],
+        'search_query': 'Dublin Ireland',
+        'country': 'ie'
+    },
+    'lisbon': {
+        'name': 'Lisbon, Portugal',
+        'coordinates': [38.7223, -9.1393],
+        'search_query': 'Lisbon Portugal',
+        'country': 'pt'
+    },
+    'brussels': {
+        'name': 'Brussels, Belgium',
+        'coordinates': [50.8503, 4.3517],
+        'search_query': 'Brussels Belgium',
+        'country': 'be'
+    },
+    'athens': {
+        'name': 'Athens, Greece',
+        'coordinates': [37.9838, 23.7275],
+        'search_query': 'Athens Greece',
+        'country': 'gr'
+    },
+    'munich': {
+        'name': 'Munich, Germany',
+        'coordinates': [48.1351, 11.5820],
+        'search_query': 'Munich Germany',
+        'country': 'de'
+    },
+    'lyon': {
+        'name': 'Lyon, France',
+        'coordinates': [45.7640, 4.8357],
+        'search_query': 'Lyon France',
+        'country': 'fr'
+    },
+    'florence': {
+        'name': 'Florence, Italy',
+        'coordinates': [43.7696, 11.2558],
+        'search_query': 'Florence Italy',
+        'country': 'it'
+    },
+    'edinburgh': {
+        'name': 'Edinburgh, Scotland',
+        'coordinates': [55.9533, -3.1883],
+        'search_query': 'Edinburgh Scotland',
+        'country': 'gb'
+    },
+    'nice': {
+        'name': 'Nice, France',
+        'coordinates': [43.7102, 7.2620],
+        'search_query': 'Nice France',
+        'country': 'fr'
+    },
+    'palma': {
+        'name': 'Palma, Spain',
+        'coordinates': [39.5696, 2.6502],
+        'search_query': 'Palma Spain',
+        'country': 'es'
+    },
+    'santorini': {
+        'name': 'Santorini, Greece',
+        'coordinates': [36.3932, 25.4615],
+        'search_query': 'Santorini Greece',
+        'country': 'gr'
+    },
     'ibiza': {
         'name': 'Ibiza, Spain',
         'coordinates': [38.9067, 1.4206],
@@ -125,7 +280,6 @@ class APIManager:
         """Retrieve from cache if valid"""
         if cache_key in self.cache and self._is_cache_valid(self.cache[cache_key]):
             cached_data = self.cache[cache_key]['data']
-            # REVISION: Add a flag to indicate the data is from cache for accurate reporting
             cached_data['is_cached'] = True
             return cached_data
         return None
@@ -158,12 +312,11 @@ class APIManager:
         
         # Try secondary source (Hotels.com) - Placeholder
         try:
-            result = self._Google Hotels_api(city_key, checkin, checkout, adults, rooms, room_type)
+            result = self._search_hotels_api(city_key, checkin, checkout, adults, rooms, room_type)
             if result and result.get('hotels'):
                 self._set_cache(cache_key, result)
                 return result
         except Exception as e:
-            # REVISION: Clarified the log message for the non-implemented API
             print(f"Hotels.com API (not implemented) skipped: {e}")
         
         # Fallback to demo data
@@ -211,7 +364,7 @@ class APIManager:
             'total_found': len(processed_hotels)
         }
     
-    def _Google Hotels_api(self, city_key, checkin, checkout, adults, rooms, room_type):
+    def _search_hotels_api(self, city_key, checkin, checkout, adults, rooms, room_type):
         """Search using Hotels.com API (fallback) - NOT IMPLEMENTED"""
         raise Exception("Hotels.com API not implemented yet.")
     
@@ -248,7 +401,7 @@ class APIManager:
             else:
                 base_lat, base_lng = city_info['coordinates']
                 coordinates = [
-                    base_lat + (i * 0.005) - 0.025, # REVISION: Reduced spread for more realistic map view
+                    base_lat + (i * 0.005) - 0.025,
                     base_lng + (i * 0.005) - 0.025
                 ]
             
@@ -293,8 +446,6 @@ class APIManager:
                     else:
                         price = int(total_price)
                 except (ValueError, TypeError):
-                    # REVISION: Added comment to explain fallback logic
-                    # If dates are invalid, assume a 1-week stay for price calculation.
                     price = int(total_price / 7)  
         elif 'price' in hotel:
             price = hotel['price']
@@ -305,10 +456,9 @@ class APIManager:
         """Extract and normalize rating from hotel data"""
         rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
         if rating:
-            # Normalize 10-point scale to 5-point scale
             rating = float(rating) / 2 if float(rating) > 5 else float(rating)
         else:
-            rating = 4.0 # Default rating if none is provided
+            rating = 4.0
         return round(rating, 1)
     
     def _get_room_description(self, hotel_name, room_type):
@@ -337,7 +487,7 @@ class APIManager:
             }
             
             params_string = urlencode(base_params, quote_via=quote_plus)
-            return f"https://www.booking.com/hotel/{country_code}/{hotel.get('url_path', '')}.{domain_suffix}?{params_string}"
+            return f"https://www.booking.com/searchresults.{domain_suffix}?{params_string}"
 
         # Fallback URL if hotel-specific data is missing
         domain_suffix = BOOKING_DOMAINS.get(country_code, 'en-gb.html')
@@ -357,7 +507,7 @@ class APIManager:
         
         base_names = hotel_templates.get(city_key, hotel_templates['default'])
         
-        for i, base_name in enumerate(base_names * 5): # Generate up to 20 hotels
+        for i, base_name in enumerate(base_names * 5):
             if room_type == 'junior_suite':
                 hotel_name = f"{base_name} Junior Suite"
             elif room_type == 'suite':
@@ -397,7 +547,6 @@ class APIManager:
 
 api_manager = APIManager()
 
-# REVISION: Helper function to create the final API response, avoiding code duplication.
 def _create_enhanced_response(result, search_params, test_mode=False):
     """Builds the standardized JSON response for hotel searches."""
     is_cached = result.pop('is_cached', False)
@@ -428,12 +577,71 @@ def _create_enhanced_response(result, search_params, test_mode=False):
         
     return jsonify(response)
 
-
 @app.route('/')
 def home():
     """Enhanced API Documentation"""
-    # The home route template is fine as it is.
-    return render_template_string('''...''', cities=CITIES, room_types=ROOM_TYPES)
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🏨 STAYFINDR Backend API v2.0</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+            h1 { color: #2c3e50; }
+            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
+            .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
+            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
+            .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
+            .room-type { background: #fff3e0; padding: 8px; margin: 5px 0; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <h1>🏨 STAYFINDR Backend API v2.0</h1>
+        <p>Professional European hotel search with room type filtering and localized booking URLs</p>
+        
+        <div class="feature">
+            <strong>✅ NEW: Room Type Filter with Junior Suite</strong><br>
+            5 room types available including Junior Suite with enhanced descriptions
+        </div>
+        
+        <div class="feature">
+            <strong>✅ CORS Enabled</strong><br>
+            Frontend can now access backend without errors
+        </div>
+        
+        <h2>Available endpoints:</h2>
+        <div class="endpoint">
+            <strong>/api/hotels</strong> - Get hotels for a city with room type filtering<br>
+            Parameters: city, checkin, checkout, adults, rooms, room_type<br>
+            <em>Now with Junior Suite support and enhanced URLs</em>
+        </div>
+        <div class="endpoint">
+            <strong>/api/cities</strong> - List all 29 cities
+        </div>
+        <div class="endpoint">
+            <strong>/api/room-types</strong> - List all 5 room types
+        </div>
+        <div class="endpoint">
+            <strong>/test</strong> - Test Stockholm Junior Suite hotels
+        </div>
+        
+        <h2>Room Types ({{ room_types|length }}):</h2>
+        {% for key, room in room_types.items() %}
+        <div class="room-type">
+            <strong>{{ room.name }}</strong> ({{ room.guests }} guests)<br>
+            {{ room.description }}
+        </div>
+        {% endfor %}
+        
+        <h2>Cities supported ({{ cities|length }}):</h2>
+        <div class="cities">
+            {% for city in cities %}
+            <div class="city">{{ city }}</div>
+            {% endfor %}
+        </div>
+    </body>
+    </html>
+    ''', cities=list(CITIES.keys()), room_types=ROOM_TYPES)
 
 @app.route('/api/cities')
 def get_cities():
@@ -475,21 +683,19 @@ def get_hotels():
         
         if checkin_date >= checkout_date:
             return jsonify({'error': 'Check-out date must be after check-in date'}), 400
-        # REVISION: Fixed bug by comparing date() objects, not datetime vs date.
         if checkin_date.date() < datetime.now().date():
             return jsonify({'error': 'Check-in date cannot be in the past'}), 400
     except ValueError:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
     
     try:
-        result = api_manager.search_hotels_multi_source
+        result = api_manager.search_hotels_multi_source(
             city, checkin, checkout, adults, rooms, room_type
         )
         search_params = {
             'city': city, 'checkin': checkin, 'checkout': checkout,
             'adults': adults, 'rooms': rooms, 'room_type': room_type
         }
-        # REVISION: Using the helper function for a clean response.
         return _create_enhanced_response(result, search_params)
         
     except Exception as e:
@@ -510,9 +716,8 @@ def test_stockholm():
             'adults': '2', 'rooms': '1', 'room_type': 'junior_suite'
         }
         
-        result = api_manager.search_hotels_multi_source (**search_params)
+        result = api_manager.search_hotels_multi_source(**search_params)
         
-        # REVISION: Using the helper function for a clean response.
         return _create_enhanced_response(result, search_params, test_mode=True)
         
     except Exception as e:
@@ -581,13 +786,12 @@ if __name__ == '__main__':
     print("🔄 Multi-platform API integration with intelligent fallback")
     print("💾 15-minute caching for optimal performance")
     print("🌍 Localized booking URLs for all European countries")
-    print("🔗 Frontend connects to this backend")
+    print("🔗 CORS enabled for GitHub Pages frontend")
     print("📋 Test API: /test (Junior Suite demo)")
     print("📊 Analytics: /api/analytics")
     print("❤️  Health check: /api/health")
     print("✅ Production-ready architecture activated")
     
     port = int(os.environ.get('PORT', 5000))
-    # Use 'debug=False' in a real production environment
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
