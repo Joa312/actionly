@@ -137,7 +137,7 @@ class APIManager:
             'timestamp': time.time()
         }
     
-    def Google Hotels_multi_source(self, city_key, checkin, checkout, adults, rooms, room_type='double'):
+    def search_hotels_multi_source(self, city_key, checkin, checkout, adults, rooms, room_type='double'):
         """Search hotels using multiple APIs with intelligent fallback"""
         cache_key = self._get_cache_key('search', city=city_key, checkin=checkin, 
                                         checkout=checkout, adults=adults, rooms=rooms, room_type=room_type)
@@ -482,7 +482,7 @@ def get_hotels():
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
     
     try:
-        result = api_manager.Google Hotels_multi_source(
+        result = api_manager.search_hotels_multi_source
             city, checkin, checkout, adults, rooms, room_type
         )
         search_params = {
@@ -510,7 +510,7 @@ def test_stockholm():
             'adults': '2', 'rooms': '1', 'room_type': 'junior_suite'
         }
         
-        result = api_manager.Google Hotels_multi_source(**search_params)
+        result = api_manager.search_hotels_multi_source (**search_params)
         
         # REVISION: Using the helper function for a clean response.
         return _create_enhanced_response(result, search_params, test_mode=True)
