@@ -273,7 +273,7 @@ def get_location_id_booking(city_query):
 
 def get_hotels_com_region_id(city_name):
     """Get Hotels.com region ID using locations/v3/search - RESEARCH-BASED METHOD"""
-    url = "https://hotels4.p.rapidapi.com/locations/v3/search"
+    url = "https://hotels4.p.rapidapi.com/locations/search"
     
     querystring = {
         "q": city_name,
