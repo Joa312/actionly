@@ -624,118 +624,194 @@ def test_hotels_com_working():
             'response': hotels_data
         })
 
-@app.route('/debug-hotels-com')
-def debug_hotels_com():
-    """Debug Hotels.com API with detailed logging"""
-    return jsonify({
-        'message': 'Use /test-hotels-com-working for the working endpoint test',
-        'old_endpoints': 'suggest and Hotels/Search gave 403 errors',
-        'new_working_endpoint': 'properties/v2/list with GraphQL structure',
-        'recommendation': 'Test the working endpoint at /test-hotels-com-working'
-    })
+# Add this enhanced debug function to your backend
 
-@app.route('/test')
-def test_multiplatform():
-    """Test endpoint with both platforms"""
-    return get_hotels_multiplatform()
-
-@app.route('/api/hotels')
-def get_hotels_multiplatform():
-    """Get hotels from both Booking.com and Hotels.com platforms - NOW WORKING!"""
-    city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', '2025-07-15')
-    checkout = request.args.get('checkout', '2025-07-16')
-    adults = request.args.get('adults', '2')
-    rooms = request.args.get('rooms', '1')
-    room_type = request.args.get('room_type', 'double')
+@app.route('/debug-hotels-com-detailed')
+def debug_hotels_com_detailed():
+    """Enhanced debug for Hotels.com API with full request/response logging"""
     
-    if city not in CITIES:
-        return jsonify({'error': f'City {city} not supported'}), 400
-    
-    city_info = CITIES[city]
-    all_hotels = []
-    
-    # Get room type info
-    room_info = ROOM_TYPES.get(room_type, ROOM_TYPES['double'])
-    
-    # Platform 1: Booking.com
-    booking_hotels = []
-    location_id = get_location_id(city_info['search_query'])
-    
-    if location_id:
-        hotels_data = search_hotels_booking_api(location_id, checkin, checkout, adults, rooms)
-        if hotels_data and 'data' in hotels_data:
-            booking_hotels = process_hotel_data_booking(
-                hotels_data['data'][:20],
-                city_info, 
-                checkin, 
-                checkout, 
-                adults, 
-                rooms,
-                city
-            )
-    
-    # Platform 2: Hotels.com - NOW WORKING!
-    hotels_com_hotels = []
-    region_id = city_info.get('hotels_com_region_id')
-    
-    if region_id:
-        hotels_com_data = search_hotels_com_working(region_id, checkin, checkout, adults)
-        if hotels_com_data:
-            hotels_com_hotels = process_hotels_com_data(
-                hotels_com_data,
-                city_info,
-                checkin,
-                checkout,
-                adults,
-                rooms
-            )
-    
-    # Combine all hotels
-    all_hotels = booking_hotels + hotels_com_hotels
-    
-    # Remove duplicates based on hotel name similarity
-    unique_hotels = []
-    seen_names = set()
-    
-    for hotel in all_hotels:
-        hotel_name_clean = hotel['name'].lower().replace(' ', '').replace('-', '')[:20]
-        if hotel_name_clean not in seen_names:
-            seen_names.add(hotel_name_clean)
-            unique_hotels.append(hotel)
-    
-    return jsonify({
-        'city': city_info['name'],
-        'hotels': unique_hotels,
-        'total_found': len(unique_hotels),
-        'booking_com_count': len(booking_hotels),
-        'hotels_com_count': len(hotels_com_hotels),
-        'platforms': ['booking.com', 'hotels.com'],
-        'search_params': {
-            'checkin': checkin,
-            'checkout': checkout,
-            'adults': adults,
-            'rooms': rooms,
-            'room_type': room_type
+    debug_info = {
+        'test_parameters': {
+            'region_id': '178293',  # Stockholm
+            'checkin': '2025-07-15',
+            'checkout': '2025-07-16',
+            'adults': 2
         },
-        'room_filter': 'enabled',
-        'room_type': room_type,
-        'room_description': room_info['description'],
-        'booking_optimization': 'enabled',
-        'localization': 'enabled',
-        'multiplatform': 'WORKING!',
-        'breakthrough': 'Both Booking.com AND Hotels.com now working!'
-    })
-
-if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend...")
-    print("🏨 MULTIPLATFORM: Booking.com + Hotels.com")
-    print("✅ BREAKTHROUGH: Hotels.com GraphQL API working!")
-    print("🔗 Using correct endpoints: properties/v2/list")
-    print("✅ Room filtering with Junior Suite support")
-    print("🌍 Supporting 29 European cities")
-    print("📋 Test endpoints: /test, /test-hotels-com-working")
+        'api_details': {},
+        'request_info': {},
+        'response_analysis': {},
+        'troubleshooting': {}
+    }
     
-    # Use PORT environment variable for deployment
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    # Test parameters
+    region_id = "178293"  # Stockholm
+    checkin = "2025-07-15"
+    checkout = "2025-07-16"
+    adults = 2
+    
+    # Format dates
+    try:
+        checkin_parts = checkin.split('-')
+        checkout_parts = checkout.split('-')
+        
+        checkin_formatted = {
+            "day": int(checkin_parts[2]),
+            "month": int(checkin_parts[1]), 
+            "year": int(checkin_parts[0])
+        }
+        
+        checkout_formatted = {
+            "day": int(checkout_parts[2]),
+            "month": int(checkout_parts[1]),
+            "year": int(checkout_parts[0])
+        }
+        
+        debug_info['request_info']['date_formatting'] = 'SUCCESS'
+        debug_info['request_info']['checkin_formatted'] = checkin_formatted
+        debug_info['request_info']['checkout_formatted'] = checkout_formatted
+        
+    except Exception as e:
+        debug_info['request_info']['date_formatting'] = f'ERROR: {str(e)}'
+        # Use fallback dates
+        checkin_formatted = {"day": 15, "month": 7, "year": 2025}
+        checkout_formatted = {"day": 16, "month": 7, "year": 2025}
+    
+    # Build request payload
+    payload = {
+        "currency": "USD",
+        "eapid": 1,
+        "locale": "en_US",
+        "siteId": 300000001,
+        "destination": {"regionId": region_id},
+        "checkInDate": checkin_formatted,
+        "checkOutDate": checkout_formatted,
+        "rooms": [{"adults": int(adults)}],
+        "resultsStartingIndex": 0,
+        "resultsSize": 25,
+        "sort": "PRICE_LOW_TO_HIGH"
+    }
+    
+    debug_info['request_info']['payload'] = payload
+    debug_info['request_info']['payload_size'] = len(str(payload))
+    
+    # Headers
+    headers = {
+        "content-type": "application/json",
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST_HOTELS
+    }
+    
+    debug_info['api_details']['host'] = RAPIDAPI_HOST_HOTELS
+    debug_info['api_details']['key_length'] = len(RAPIDAPI_KEY)
+    debug_info['api_details']['key_starts_with'] = RAPIDAPI_KEY[:10] + "..."
+    
+    # Make request with detailed logging
+    url = "https://hotels4.p.rapidapi.com/properties/v2/list"
+    debug_info['request_info']['url'] = url
+    debug_info['request_info']['method'] = 'POST'
+    
+    try:
+        # Log request details
+        debug_info['request_info']['headers_sent'] = {
+            'content-type': headers['content-type'],
+            'x-rapidapi-host': headers['x-rapidapi-host'],
+            'x-rapidapi-key': f"{headers['x-rapidapi-key'][:10]}..."
+        }
+        
+        # Make the actual request
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        # Log response details
+        debug_info['response_analysis']['status_code'] = response.status_code
+        debug_info['response_analysis']['response_headers'] = dict(response.headers)
+        debug_info['response_analysis']['response_size'] = len(response.text) if response.text else 0
+        debug_info['response_analysis']['content_type'] = response.headers.get('content-type', 'unknown')
+        
+        # Check if we got any response
+        if response.text:
+            debug_info['response_analysis']['has_content'] = True
+            debug_info['response_analysis']['first_100_chars'] = response.text[:100]
+            
+            # Try to parse JSON
+            try:
+                json_data = response.json()
+                debug_info['response_analysis']['json_parse'] = 'SUCCESS'
+                debug_info['response_analysis']['json_keys'] = list(json_data.keys()) if isinstance(json_data, dict) else 'NOT_DICT'
+                
+                # Analyze the structure
+                if isinstance(json_data, dict):
+                    if 'data' in json_data:
+                        data = json_data['data']
+                        debug_info['response_analysis']['has_data_key'] = True
+                        debug_info['response_analysis']['data_type'] = type(data).__name__
+                        
+                        if isinstance(data, dict):
+                            debug_info['response_analysis']['data_keys'] = list(data.keys())
+                            
+                            if 'propertySearch' in data:
+                                prop_search = data['propertySearch']
+                                debug_info['response_analysis']['has_property_search'] = True
+                                debug_info['response_analysis']['property_search_keys'] = list(prop_search.keys()) if isinstance(prop_search, dict) else 'NOT_DICT'
+                                
+                                if isinstance(prop_search, dict) and 'properties' in prop_search:
+                                    properties = prop_search['properties']
+                                    debug_info['response_analysis']['properties_count'] = len(properties) if isinstance(properties, list) else 'NOT_LIST'
+                                    debug_info['response_analysis']['properties_type'] = type(properties).__name__
+                                    
+                                    # Sample first property
+                                    if isinstance(properties, list) and len(properties) > 0:
+                                        first_prop = properties[0]
+                                        debug_info['response_analysis']['sample_property_keys'] = list(first_prop.keys()) if isinstance(first_prop, dict) else 'NOT_DICT'
+                                        debug_info['response_analysis']['sample_property_name'] = first_prop.get('name', 'NO_NAME') if isinstance(first_prop, dict) else 'CANNOT_ACCESS'
+                            else:
+                                debug_info['response_analysis']['property_search_missing'] = True
+                        else:
+                            debug_info['response_analysis']['data_not_dict'] = True
+                    else:
+                        debug_info['response_analysis']['no_data_key'] = True
+                        debug_info['response_analysis']['available_keys'] = list(json_data.keys())
+                
+                # Include full response for small responses
+                if len(str(json_data)) < 1000:
+                    debug_info['response_analysis']['full_response'] = json_data
+                    
+            except json.JSONDecodeError as e:
+                debug_info['response_analysis']['json_parse'] = f'FAILED: {str(e)}'
+                debug_info['response_analysis']['raw_response'] = response.text[:500]
+        else:
+            debug_info['response_analysis']['has_content'] = False
+            debug_info['response_analysis']['empty_response'] = True
+            
+    except requests.exceptions.Timeout:
+        debug_info['response_analysis']['error'] = 'REQUEST_TIMEOUT'
+    except requests.exceptions.ConnectionError:
+        debug_info['response_analysis']['error'] = 'CONNECTION_ERROR'
+    except Exception as e:
+        debug_info['response_analysis']['error'] = f'EXCEPTION: {str(e)}'
+    
+    # Troubleshooting suggestions
+    if debug_info['response_analysis'].get('status_code') == 200:
+        debug_info['troubleshooting']['status'] = 'HTTP 200 OK - API accessible'
+    elif debug_info['response_analysis'].get('status_code') == 403:
+        debug_info['troubleshooting']['status'] = 'HTTP 403 - Check API subscription'
+    elif debug_info['response_analysis'].get('status_code') == 429:
+        debug_info['troubleshooting']['status'] = 'HTTP 429 - Rate limit exceeded'
+    else:
+        debug_info['troubleshooting']['status'] = f"HTTP {debug_info['response_analysis'].get('status_code', 'UNKNOWN')}"
+    
+    # Recommendations
+    debug_info['troubleshooting']['recommendations'] = []
+    
+    if debug_info['response_analysis'].get('status_code') != 200:
+        debug_info['troubleshooting']['recommendations'].append('Check API endpoint and subscription status')
+    
+    if not debug_info['response_analysis'].get('has_content'):
+        debug_info['troubleshooting']['recommendations'].append('API returned empty response - check request format')
+    
+    if debug_info['response_analysis'].get('json_parse', '').startswith('FAILED'):
+        debug_info['troubleshooting']['recommendations'].append('Response is not valid JSON - check API documentation')
+    
+    if not debug_info['response_analysis'].get('has_data_key'):
+        debug_info['troubleshooting']['recommendations'].append('Response missing data key - API structure may have changed')
+    
+    return jsonify(debug_info)
