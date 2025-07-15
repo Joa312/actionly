@@ -906,19 +906,98 @@ def test_stockholm():
         'room_type': 'double'
     }
     
-    # Simulate request args for the main endpoint
-    original_args = request.args
-    request.args = test_params
+    # Create a mock request object for validation
+    class MockArgs:
+        def __init__(self, params):
+            self.params = params
+        def get(self, key, default=None):
+            return self.params.get(key, default)
     
+    # Validate parameters using our validation function
+    mock_args = MockArgs(test_params)
+    params, errors = validate_search_params(mock_args)
+    
+    if errors:
+        return jsonify({
+            'error': 'Test validation failed',
+            'details': errors,
+            'test_params': test_params
+        }), 500
+    
+    # Extract validated parameters
+    city = params['city']
+    checkin = params['checkin']
+    checkout = params['checkout']
+    adults = params['adults']
+    rooms = params['rooms']
+    room_type = params['room_type']
+    
+    city_info = CITIES[city]
+    room_config = ROOM_TYPES[room_type]
+    
+    # Search hotels with intelligent fallback
     try:
-        response = get_hotels()
-        request.args = original_args
-        return response
+        hotels_data, data_source = search_hotels_with_fallback(
+            city_info, checkin, checkout, adults, rooms
+        )
+        
+        if not hotels_data or 'data' not in hotels_data or not hotels_data['data']:
+            return jsonify({
+                'error': 'No hotels found in test',
+                'city': city_info['name'],
+                'test_params': test_params,
+                'debug_info': {
+                    'location_id': city_info['location_id'],
+                    'api_attempted': 'booking_com',
+                    'dates': f"{checkin.strftime('%Y-%m-%d')} to {checkout.strftime('%Y-%m-%d')}"
+                }
+            }), 404
+        
+        # Process hotel data
+        processed_hotels = process_hotel_data(
+            hotels_data['data'],
+            city_info,
+            checkin,
+            checkout,
+            adults,
+            rooms,
+            city,
+            room_type,
+            data_source
+        )
+        
+        # Return test results
+        return jsonify({
+            'test_status': 'SUCCESS',
+            'city': city_info['name'],
+            'hotels': processed_hotels,
+            'total_found': len(processed_hotels),
+            'search_params': {
+                'city': city,
+                'checkin': checkin.strftime('%Y-%m-%d'),
+                'checkout': checkout.strftime('%Y-%m-%d'),
+                'adults': adults,
+                'rooms': rooms,
+                'room_type': room_type,
+                'nights': (checkout - checkin).days
+            },
+            'system_info': {
+                'data_source': data_source,
+                'cache_status': 'active',
+                'validation': 'passed'
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
     except Exception as e:
-        request.args = original_args
         return jsonify({
             'error': f'Test failed: {str(e)}',
             'system_status': 'degraded',
+            'test_params': test_params,
+            'debug_info': {
+                'error_type': type(e).__name__,
+                'location_id': city_info.get('location_id', 'unknown')
+            },
             'recommendation': 'Check API keys and connectivity'
         }), 500
 
