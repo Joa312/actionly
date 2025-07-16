@@ -1,5 +1,5 @@
-# STAYFINDR BACKEND v6.1 - Foolproof Production Version
-# Refactored long lines to be robust against copy-paste errors.
+# STAYFINDR BACKEND v6.2 - Robust CSV Loading
+# Handles potential missing coordinate data in cities.csv gracefully.
 
 import os
 import logging
@@ -47,19 +47,35 @@ ROOM_TYPES = {
     'suite': {'name': 'Suite/Apartment', 'description': 'Luxury accommodation', 'guests': 3, 'booking_params': {'group_adults': 3, 'no_rooms': 1}}
 }
 
+# Function to load cities from the CSV file
 def load_cities_from_csv(filename='cities.csv'):
+    """
+    Loads city data from a CSV file and formats it into the required dictionary structure.
+    """
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
             reader = csv.DictReader(infile)
-            for row in reader:
-                key = row['key']
+            for i, row in enumerate(reader):
+                key = row.get('key')
+                if not key:
+                    logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
+                    continue
+
+                # REVISION: Added robust error handling for float conversion.
+                lat, lon = 0.0, 0.0 # Default coordinates
+                try:
+                    lat = float(row.get('lat'))
+                    lon = float(row.get('lon'))
+                except (ValueError, TypeError):
+                    logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}. Using default (0,0).")
+
                 cities[key] = {
-                    'name': row['name'],
-                    'coordinates': [float(row['lat']), float(row['lon'])],
-                    'search_query': row['search_query'],
-                    'country': row['country'],
-                    'tripadvisor_id': row['tripadvisor_id']
+                    'name': row.get('name', 'N/A'),
+                    'coordinates': [lat, lon],
+                    'search_query': row.get('search_query', ''),
+                    'country': row.get('country', ''),
+                    'tripadvisor_id': row.get('tripadvisor_id', '')
                 }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
@@ -67,13 +83,17 @@ def load_cities_from_csv(filename='cities.csv'):
         logging.error(f"CRITICAL: The file {filename} was not found. The application cannot start without it.")
         raise
     except Exception as e:
-        logging.error(f"CRITICAL: Failed to read or parse {filename}. Error: {e}")
+        logging.error(f"CRITICAL: Failed to read or parse {filename}. Error: {e}", exc_info=True)
         raise
 
+# The CITIES dictionary is now loaded from the CSV file at startup.
 CITIES = load_cities_from_csv('cities.csv')
+
+# --- External API Functions with Caching ---
 
 @cache
 def get_booking_location_id(city_query):
+    if not city_query: return None
     url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
     try:
         response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params={"query": city_query}, timeout=10)
@@ -99,6 +119,7 @@ def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
 
 @cache
 def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
+    if not geo_id: return None
     url = f"https://{TRIPADVISOR_API_HOST}/api/v1/hotels/searchHotels"
     params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
     try:
@@ -109,6 +130,8 @@ def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
     except RequestException as e:
         logging.error(f"TripAdvisor search request failed: {e}")
     return []
+
+# --- Data Processing Functions ---
 
 def process_booking_hotels(hotels_data, city_info, search_params):
     processed = []
@@ -164,6 +187,8 @@ def process_tripadvisor_hotels(hotels_data, city_info, search_params):
         })
     return processed
 
+# --- URL & Fallback Generators ---
+
 def create_booking_url(hotel, city_info, params):
     country_code_map = {
         'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es',
@@ -189,20 +214,14 @@ def get_demo_hotels(city_info, room_type, source):
     ]
     processed_demos = []
     for i, demo in enumerate(demo_templates):
-        # REVISION: Broke down the long, complex line into simple, short lines.
-        # This is robust against copy-paste errors.
         base_lat = city_info['coordinates'][0]
         base_lon = city_info['coordinates'][1]
-        offset = i * 0.01 - 0.01  # Calculate a small offset
+        offset = i * 0.01 - 0.01
         
         demo_hotel = {
-            'id': f"demo_{source}_{i}",
-            'name': demo['name'],
-            'address': city_info['name'],
+            'id': f"demo_{source}_{i}", 'name': demo['name'], 'address': city_info['name'],
             'coordinates': [base_lat + offset, base_lon + offset],
-            'price': demo['price'],
-            'rating': demo['rating'],
-            'source': source,
+            'price': demo['price'], 'rating': demo['rating'], 'source': source,
             'room_type': ROOM_TYPES.get(room_type, {}).get('name'),
             'booking_url': f"https://www.{source.split('.')[0]}.com/"
         }
@@ -265,7 +284,7 @@ def handle_hotel_search(source):
 # --- Flask Routes ---
 @app.route('/')
 def home():
-    return render_template_string('<h1>STAYFINDR Backend v6.1</h1><p>City data is now loaded from cities.csv</p>')
+    return render_template_string('<h1>STAYFINDR Backend v6.2</h1><p>City data is now loaded from cities.csv</p>')
 
 @app.route('/api/cities')
 def get_cities_route():
@@ -281,20 +300,3 @@ def get_booking_hotels_route():
 
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels_route():
-    return handle_hotel_search(source='tripadvisor')
-
-@app.route('/api/hotels')
-def get_hotels_legacy_route():
-    return handle_hotel_search(source='booking')
-
-@app.route('/test')
-def test_endpoint_route():
-    return jsonify({'status': 'STAYFINDR Backend v6.1 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
-
-# --- Application Startup ---
-if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v6.1...")
-    logging.info("▶️ Now loading city data from cities.csv.")
-    is_production = os.environ.get('FLASK_ENV') == 'production'
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=not is_production, host='0.0.0.0', port=port)
