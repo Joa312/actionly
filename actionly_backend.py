@@ -12,7 +12,10 @@ from datetime import datetime
 from urllib.parse import quote_plus
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[
+    "https://joa312.github.io",
+    "http://localhost:5000"
+])
 
 # RapidAPI Configuration
 RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
