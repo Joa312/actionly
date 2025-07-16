@@ -56,7 +56,7 @@ def load_cities_from_csv(filename='cities.csv'):
     try:
         # Use utf-8-sig to handle potential BOM (Byte Order Mark) from Excel
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
-            reader = csv.DictReader(infile)
+            reader = csv.DictReader(infile, delimiter=';')
             for i, row in enumerate(reader):
                 key = row.get('key')
                 if not key:
@@ -66,8 +66,11 @@ def load_cities_from_csv(filename='cities.csv'):
                 # Added robust error handling for float conversion.
                 lat, lon = 0.0, 0.0 # Default coordinates
                 try:
-                    lat = float(row.get('lat'))
-                    lon = float(row.get('lon'))
+                    # Replace comma decimal separator with a period for float conversion
+                    lat_str = row.get('lat', '0').replace(',', '.')
+                    lon_str = row.get('lon', '0').replace(',', '.')
+                    lat = float(lat_str)
+                    lon = float(lon_str)
                 except (ValueError, TypeError):
                     logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}. Using default (0,0).")
 
