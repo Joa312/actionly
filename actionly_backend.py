@@ -1,5 +1,5 @@
-# STAYFINDR BACKEND v6.3 - Intelligent CSV Loading
-# Uses CSV Sniffer to automatically detect delimiters (comma vs. semicolon).
+# STAYFINDR BACKEND v6.4 - Data Cleaning & Final Polish
+# Automatically cleans city names from CSV to remove extra quotes and whitespace.
 
 import os
 import logging
@@ -50,23 +50,23 @@ ROOM_TYPES = {
 # Function to load cities from the CSV file
 def load_cities_from_csv(filename='cities.csv'):
     """
-    Loads city data from a CSV file, automatically detecting the delimiter.
+    Loads city data from a CSV file, automatically detecting the delimiter and cleaning the data.
     """
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
-            # REVISION: Use Sniffer to automatically detect CSV format (comma vs semicolon).
+            # Use Sniffer to automatically detect CSV format (comma vs semicolon).
             try:
                 dialect = csv.Sniffer().sniff(infile.read(1024))
-                infile.seek(0) # Reset file pointer after sniffing
+                infile.seek(0) 
                 reader = csv.DictReader(infile, dialect=dialect)
             except csv.Error:
                 logging.warning("CSV Sniffer failed, falling back to comma delimiter.")
                 infile.seek(0)
-                reader = csv.DictReader(infile) # Default to comma if sniffing fails
+                reader = csv.DictReader(infile)
 
             for i, row in enumerate(reader):
-                if not any(row.values()): # Skip completely empty rows
+                if not any(row.values()):
                     continue
                 
                 key = row.get('key')
@@ -74,7 +74,7 @@ def load_cities_from_csv(filename='cities.csv'):
                     logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
                     continue
 
-                lat, lon = 0.0, 0.0 # Default coordinates
+                lat, lon = 0.0, 0.0
                 try:
                     lat_str = row.get('lat', '0').replace(',', '.')
                     lon_str = row.get('lon', '0').replace(',', '.')
@@ -82,9 +82,13 @@ def load_cities_from_csv(filename='cities.csv'):
                     lon = float(lon_str)
                 except (ValueError, TypeError):
                     logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}. Using default (0,0).")
+                
+                # REVISION: Clean the city name to remove extra quotes and whitespace.
+                raw_name = row.get('name', 'N/A')
+                cleaned_name = raw_name.replace('"', '').strip()
 
                 cities[key] = {
-                    'name': row.get('name', 'N/A'),
+                    'name': cleaned_name,
                     'coordinates': [lat, lon],
                     'search_query': row.get('search_query', ''),
                     'country': row.get('country', ''),
@@ -299,7 +303,7 @@ def handle_hotel_search(source):
 # --- Flask Routes ---
 @app.route('/')
 def home():
-    return render_template_string('<h1>STAYFINDR Backend v6.3</h1><p>City data is now loaded from cities.csv</p>')
+    return render_template_string('<h1>STAYFINDR Backend v6.4</h1><p>City data is now loaded from cities.csv</p>')
 
 @app.route('/api/cities')
 def get_cities_route():
@@ -323,11 +327,11 @@ def get_hotels_legacy_route():
 
 @app.route('/test')
 def test_endpoint_route():
-    return jsonify({'status': 'STAYFINDR Backend v6.3 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
+    return jsonify({'status': 'STAYFINDR Backend v6.4 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v6.3...")
+    logging.info("🚀 Starting STAYFINDR Backend v6.4...")
     logging.info("▶️ Now loading city data from cities.csv.")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
