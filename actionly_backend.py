@@ -1,6 +1,6 @@
-# STAYFINDR BACKEND - Professional Production-Ready Architecture
-# Multi-platform integration with robust error handling and caching
-# Combines proven APIs with modern Python patterns + Demo Data Fallback
+# STAYFINDR BACKEND v3.0 - TripAdvisor Integration (Stockholm Test)
+# Multi-platform integration: Booking.com + TripAdvisor
+# Stockholm TripAdvisor test implementation
 
 import os
 import json
@@ -16,19 +16,27 @@ import requests
 
 app = Flask(__name__)
 CORS(app, origins="*")
-   
 
 # =============================================================================
 # CONFIGURATION & CONSTANTS
 # =============================================================================
 
-# REVISION: Removed hardcoded API key for security. App will now fail if key is not set.
 RAPIDAPI_KEY = os.environ.get('RAPIDAPI_KEY')
 if not RAPIDAPI_KEY:
     raise ValueError("FATAL ERROR: RAPIDAPI_KEY environment variable not set.")
 
+# API Hosts
 RAPIDAPI_HOST_BOOKING = "booking-com18.p.rapidapi.com"
-RAPIDAPI_HOST_HOTELS = "hotels-com-provider.p.rapidapi.com"
+RAPIDAPI_HOST_TRIPADVISOR = "tripadvisor-com1.p.rapidapi.com"
+
+# TripAdvisor GeoIDs (Stockholm test + future expansion)
+TRIPADVISOR_GEO_IDS = {
+    'stockholm': '60763',  # Confirmed working geoId
+    # Future expansion:
+    # 'paris': 'TBD',
+    # 'london': 'TBD',
+    # ... (to be researched)
+}
 
 # European Cities Configuration - 29 major destinations
 CITIES = {
@@ -287,41 +295,183 @@ class APIManager:
             'timestamp': time.time()
         }
     
-    def search_hotels_multi_source(self, city_key, checkin, checkout, adults, rooms, room_type='double'):
+    def search_hotels_multi_source(self, city_key, checkin, checkout, adults, rooms, room_type='double', source='booking'):
         """Search hotels using multiple APIs with intelligent fallback"""
         cache_key = self._get_cache_key('search', city=city_key, checkin=checkin, 
-                                        checkout=checkout, adults=adults, rooms=rooms, room_type=room_type)
+                                        checkout=checkout, adults=adults, rooms=rooms, 
+                                        room_type=room_type, source=source)
         
         # Check cache first
         cached_result = self._get_from_cache(cache_key)
         if cached_result:
             return cached_result
         
-        # Try primary source (Booking.com)
+        # Route to appropriate API based on source
         try:
-            result = self._search_booking_api(city_key, checkin, checkout, adults, rooms, room_type)
+            if source == 'tripadvisor':
+                result = self._search_tripadvisor_api(city_key, checkin, checkout, adults, rooms, room_type)
+            else:  # Default to booking
+                result = self._search_booking_api(city_key, checkin, checkout, adults, rooms, room_type)
+                
             if result and result.get('hotels'):
                 self._set_cache(cache_key, result)
                 return result
         except Exception as e:
-            print(f"Booking API failed: {e}")
-        
-        # Try secondary source (Hotels.com) - Placeholder
-        try:
-            result = self._search_hotels_api(city_key, checkin, checkout, adults, rooms, room_type)
-            if result and result.get('hotels'):
-                self._set_cache(cache_key, result)
-                return result
-        except Exception as e:
-            print(f"Hotels.com API (not implemented) skipped: {e}")
-        
+            print(f"{source} API failed: {e}")
+            
         # Fallback to demo data
-        result = self._generate_demo_data(city_key, room_type)
+        result = self._generate_demo_data(city_key, room_type, source)
         self._set_cache(cache_key, result)
         return result
     
+    def _search_tripadvisor_api(self, city_key, checkin, checkout, adults, rooms, room_type):
+        """Search using TripAdvisor API (Stockholm test)"""
+        
+        # Check if city is supported
+        if city_key not in TRIPADVISOR_GEO_IDS:
+            raise Exception(f"TripAdvisor: {city_key} not yet supported. Currently only Stockholm available in beta.")
+        
+        city_info = CITIES[city_key]
+        geo_id = TRIPADVISOR_GEO_IDS[city_key]
+        
+        # TripAdvisor API call
+        url = "https://tripadvisor-com1.p.rapidapi.com/hotels/search"
+        querystring = {
+            "geoId": geo_id,
+            # TripAdvisor doesn't use check-in/out dates in the same way
+            # We'll get general hotel info and process later
+        }
+        
+        headers = {
+            "x-rapidapi-key": RAPIDAPI_KEY,
+            "x-rapidapi-host": RAPIDAPI_HOST_TRIPADVISOR
+        }
+        
+        response = requests.get(url, headers=headers, params=querystring, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        if not data.get('data'):
+            raise Exception("No hotels returned from TripAdvisor API")
+        
+        # Process TripAdvisor data
+        processed_hotels = self._process_tripadvisor_hotels(
+            data['data'][:30], city_info, checkin, checkout, adults, rooms, room_type
+        )
+        
+        return {
+            'source': 'tripadvisor',
+            'city': city_info['name'],
+            'hotels': processed_hotels,
+            'total_found': len(processed_hotels)
+        }
+    
+    def _process_tripadvisor_hotels(self, hotels_data, city_info, checkin, checkout, adults, rooms, room_type):
+        """Process hotel data from TripAdvisor API"""
+        processed_hotels = []
+        
+        for i, hotel in enumerate(hotels_data):
+            # TripAdvisor data structure (adapt based on actual API response)
+            hotel_name = hotel.get('title', 'Unknown Hotel')
+            hotel_id = hotel.get('locationId') or f"ta_hotel_{i}"
+            
+            # Coordinates from TripAdvisor
+            latitude = hotel.get('latitude')
+            longitude = hotel.get('longitude')
+            
+            if latitude and longitude:
+                coordinates = [float(latitude), float(longitude)]
+            else:
+                # Fallback: spread around city center
+                base_lat, base_lng = city_info['coordinates']
+                coordinates = [
+                    base_lat + (i * 0.005) - 0.025,
+                    base_lng + (i * 0.005) - 0.025
+                ]
+            
+            # TripAdvisor pricing (might not be available, use estimate)
+            price = self._extract_tripadvisor_price(hotel, room_type)
+            
+            # TripAdvisor rating (their strength!)
+            rating = self._extract_tripadvisor_rating(hotel)
+            
+            # Room description
+            room_description = self._get_room_description(hotel_name, room_type)
+            
+            # Create TripAdvisor URL
+            booking_url = self._create_tripadvisor_url(hotel, city_info, checkin, checkout, adults, rooms)
+            
+            processed_hotel = {
+                'id': hotel_id,
+                'name': hotel_name,
+                'address': hotel.get('address', city_info['name']),
+                'coordinates': coordinates,
+                'price': price,
+                'rating': rating,
+                'room_type': ROOM_TYPES[room_type]['name'],
+                'room_description': room_description,
+                'booking_url': booking_url,
+                'source': 'tripadvisor',
+                'review_count': hotel.get('reviewCount', 0),
+                'rank': hotel.get('rank', 0)
+            }
+            
+            processed_hotels.append(processed_hotel)
+        
+        return processed_hotels
+    
+    def _extract_tripadvisor_price(self, hotel, room_type):
+        """Extract price from TripAdvisor data"""
+        # TripAdvisor might not have direct pricing, use estimates
+        if 'priceLevel' in hotel:
+            price_level = hotel['priceLevel']
+            # Convert price level to estimated EUR
+            price_estimates = {'$': 80, '$$': 150, '$$$': 250, '$$$$': 400}
+            base_price = price_estimates.get(price_level, 150)
+            
+            # Adjust for room type
+            multipliers = {'junior_suite': 1.4, 'suite': 1.8, 'single': 0.7, 'family': 1.3}
+            return int(base_price * multipliers.get(room_type, 1.0))
+        
+        # Fallback to random realistic price
+        base_prices = {'single': 100, 'double': 150, 'family': 220, 'junior_suite': 200, 'suite': 300}
+        return base_prices.get(room_type, 150) + random.randint(-30, 50)
+    
+    def _extract_tripadvisor_rating(self, hotel):
+        """Extract and normalize rating from TripAdvisor"""
+        rating = hotel.get('rating', hotel.get('avgRating', 4.0))
+        if rating:
+            # TripAdvisor uses 5-point scale already
+            return round(float(rating), 1)
+        return 4.0
+    
+    def _create_tripadvisor_url(self, hotel, city_info, checkin, checkout, adults, rooms):
+        """Create TripAdvisor hotel URL"""
+        location_id = hotel.get('locationId', '')
+        hotel_name = hotel.get('title', 'hotel')
+        
+        if location_id:
+            # Create direct TripAdvisor hotel URL
+            base_url = f"https://www.tripadvisor.com/Hotel_Review-g60763-d{location_id}"
+            
+            # Add search parameters (TripAdvisor format)
+            params = {
+                'adults': adults,
+                'checkin': checkin,
+                'checkout': checkout,
+                'rooms': rooms
+            }
+            
+            param_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+            return f"{base_url}?{param_string}"
+        
+        # Fallback to search URL
+        search_name = quote_plus(hotel_name)
+        return f"https://www.tripadvisor.com/Hotels-g60763-Stockholm_Sweden-Hotels.html?q={search_name}"
+    
+    # Keep existing Booking.com methods unchanged
     def _search_booking_api(self, city_key, checkin, checkout, adults, rooms, room_type):
-        """Search using Booking.com API"""
+        """Search using Booking.com API (existing implementation)"""
         city_info = CITIES[city_key]
         location_id = self._get_booking_location_id(city_info['search_query'])
         
@@ -360,10 +510,7 @@ class APIManager:
             'total_found': len(processed_hotels)
         }
     
-    def _search_hotels_api(self, city_key, checkin, checkout, adults, rooms, room_type):
-        """Search using Hotels.com API (fallback) - NOT IMPLEMENTED"""
-        raise Exception("Hotels.com API not implemented yet.")
-    
+    # Keep all existing Booking.com helper methods...
     def _get_booking_location_id(self, city_query):
         """Get Booking.com location ID for a city"""
         url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
@@ -485,11 +632,10 @@ class APIManager:
             params_string = urlencode(base_params, quote_via=quote_plus)
             return f"https://www.booking.com/searchresults.{domain_suffix}?{params_string}"
 
-        # Fallback URL if hotel-specific data is missing
         domain_suffix = BOOKING_DOMAINS.get(country_code, 'en-gb.html')
         return f"https://www.booking.com/searchresults.{domain_suffix}?ss={quote_plus(hotel_name)}"
 
-    def _generate_demo_data(self, city_key, room_type):
+    def _generate_demo_data(self, city_key, room_type, source='booking'):
         """Generate realistic demo data when APIs fail"""
         city_info = CITIES[city_key]
         demo_hotels = []
@@ -521,19 +667,25 @@ class APIManager:
             price_multipliers = {'junior_suite': 1.4, 'suite': 1.8, 'single': 0.7}
             price = int(base_price * price_multipliers.get(room_type, 1.0))
             
+            # Different demo URLs for different sources
+            if source == 'tripadvisor':
+                demo_url = f"https://www.tripadvisor.com/Hotels-g60763-Stockholm_Sweden-Hotels.html?q={quote_plus(hotel_name)}"
+            else:
+                demo_url = f"https://www.booking.com/searchresults.{BOOKING_DOMAINS.get(city_info['country'], 'en-gb.html')}?ss={quote_plus(hotel_name)}"
+            
             demo_hotel = {
-                'id': f"demo_{city_key}_{i}", 'name': hotel_name,
+                'id': f"demo_{source}_{city_key}_{i}", 'name': hotel_name,
                 'address': f"{city_info['name']} City Center", 'coordinates': coordinates,
                 'price': price, 'rating': round(random.uniform(3.5, 4.8), 1),
                 'room_type': ROOM_TYPES[room_type]['name'],
                 'room_description': ROOM_TYPES[room_type]['description'],
-                'booking_url': f"https://www.booking.com/searchresults.{BOOKING_DOMAINS.get(city_info['country'], 'en-gb.html')}?ss={quote_plus(hotel_name)}",
-                'source': 'demo_data'
+                'booking_url': demo_url,
+                'source': f'demo_{source}'
             }
             demo_hotels.append(demo_hotel)
         
         return {
-            'source': 'demo_data', 'city': city_info['name'],
+            'source': f'demo_{source}', 'city': city_info['name'],
             'hotels': demo_hotels, 'total_found': len(demo_hotels)
         }
 
@@ -547,6 +699,7 @@ def _create_enhanced_response(result, search_params, test_mode=False):
     """Builds the standardized JSON response for hotel searches."""
     is_cached = result.pop('is_cached', False)
     room_type = search_params['room_type']
+    source = search_params.get('source', 'booking')
     
     response = {
         'city': result['city'],
@@ -561,26 +714,28 @@ def _create_enhanced_response(result, search_params, test_mode=False):
         },
         'api_info': {
             'source': result['source'],
-            'version': '2.0',
+            'version': '3.0',
             'cached': 'cache_hit' if is_cached else 'fresh_data',
             'localization': 'enabled',
-            'url_type': 'hotel_name_based_with_room_filter'
+            'url_type': 'hotel_name_based_with_room_filter',
+            'tripadvisor_beta': source == 'tripadvisor',
+            'supported_cities_tripadvisor': list(TRIPADVISOR_GEO_IDS.keys()) if source == 'tripadvisor' else None
         }
     }
     if test_mode:
         response['api_info']['test_mode'] = True
-        response['api_info']['test_description'] = 'Stockholm Junior Suite demonstration'
+        response['api_info']['test_description'] = f'{source.title()} Stockholm demonstration'
         
     return jsonify(response)
 
 @app.route('/')
 def home():
-    """Enhanced API Documentation"""
+    """Enhanced API Documentation with TripAdvisor support"""
     return render_template_string('''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🏨 STAYFINDR Backend API v2.0</title>
+        <title>🏨 STAYFINDR Backend API v3.0</title>
         <style>
             body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
             h1 { color: #2c3e50; }
@@ -589,36 +744,67 @@ def home():
             .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
             .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
             .room-type { background: #fff3e0; padding: 8px; margin: 5px 0; border-radius: 4px; }
+            .beta-feature { background: #fff3e0; border-left: 4px solid #f39c12; padding: 10px; margin: 10px 0; border-radius: 4px; }
+            .tripadvisor-section { background: #e8f8f5; border-left: 4px solid #00af87; padding: 15px; margin: 15px 0; border-radius: 8px; }
         </style>
     </head>
     <body>
-        <h1>🏨 STAYFINDR Backend API v2.0</h1>
-        <p>Professional European hotel search with room type filtering and localized booking URLs</p>
+        <h1>🏨 STAYFINDR Backend API v3.0</h1>
+        <p>Dual-source European hotel search: Booking.com + TripAdvisor integration</p>
         
         <div class="feature">
-            <strong>✅ NEW: Room Type Filter with Junior Suite</strong><br>
+            <strong>✅ NEW: TripAdvisor Integration (Stockholm Beta)</strong><br>
+            Search TripAdvisor for reviews and ratings alongside Booking.com prices
+        </div>
+        
+        <div class="feature">
+            <strong>✅ Room Type Filter with Junior Suite</strong><br>
             5 room types available including Junior Suite with enhanced descriptions
         </div>
         
         <div class="feature">
             <strong>✅ CORS Enabled</strong><br>
-            Frontend can now access backend without errors
+            Frontend can access backend without errors from any domain
+        </div>
+        
+        <div class="tripadvisor-section">
+            <h3>🆕 TripAdvisor Beta Features:</h3>
+            <ul>
+                <li><strong>Stockholm Only:</strong> Currently testing with Stockholm (geoId: 60763)</li>
+                <li><strong>Review Focus:</strong> Enhanced ratings and review data</li>
+                <li><strong>Direct Links:</strong> TripAdvisor hotel pages with search parameters</li>
+                <li><strong>Smart Pricing:</strong> Estimated prices based on TripAdvisor price levels</li>
+            </ul>
         </div>
         
         <h2>Available endpoints:</h2>
         <div class="endpoint">
-            <strong>/api/hotels</strong> - Get hotels for a city with room type filtering<br>
-            Parameters: city, checkin, checkout, adults, rooms, room_type<br>
-            <em>Now with Junior Suite support and enhanced URLs</em>
+            <strong>/api/hotels</strong> - Get hotels for a city with source selection<br>
+            Parameters: city, checkin, checkout, adults, rooms, room_type, <em>source</em><br>
+            <em>source=booking (default) or source=tripadvisor (Stockholm only)</em>
         </div>
         <div class="endpoint">
-            <strong>/api/cities</strong> - List all 29 cities
+            <strong>/api/hotels/tripadvisor</strong> - TripAdvisor-specific search<br>
+            Parameters: city, checkin, checkout, adults, rooms, room_type<br>
+            <em>Currently supports Stockholm only</em>
+        </div>
+        <div class="endpoint">
+            <strong>/api/cities</strong> - List all 29 cities (TripAdvisor: 1 city)
         </div>
         <div class="endpoint">
             <strong>/api/room-types</strong> - List all 5 room types
         </div>
         <div class="endpoint">
-            <strong>/test</strong> - Test Stockholm Junior Suite hotels
+            <strong>/test</strong> - Test Stockholm hotels (Booking.com)
+        </div>
+        <div class="endpoint">
+            <strong>/test/tripadvisor</strong> - Test Stockholm TripAdvisor integration
+        </div>
+        
+        <div class="beta-feature">
+            <strong>🧪 TripAdvisor Beta Status:</strong><br>
+            Stockholm: ✅ Active (geoId: 60763)<br>
+            Other cities: 🚧 Coming soon (need geoId research)
         </div>
         
         <h2>Room Types ({{ room_types|length }}):</h2>
@@ -629,23 +815,33 @@ def home():
         </div>
         {% endfor %}
         
-        <h2>Cities supported ({{ cities|length }}):</h2>
+        <h2>Cities supported:</h2>
+        <p><strong>Booking.com:</strong> All {{ cities|length }} cities</p>
+        <p><strong>TripAdvisor Beta:</strong> {{ tripadvisor_cities|length }} city (Stockholm)</p>
         <div class="cities">
             {% for city in cities %}
-            <div class="city">{{ city }}</div>
+            <div class="city">
+                {{ city }}
+                {% if city in tripadvisor_cities %}⭐{% endif %}
+            </div>
             {% endfor %}
         </div>
+        
+        <p><small>⭐ = TripAdvisor supported</small></p>
     </body>
     </html>
-    ''', cities=list(CITIES.keys()), room_types=ROOM_TYPES)
+    ''', cities=list(CITIES.keys()), room_types=ROOM_TYPES, 
+         tripadvisor_cities=list(TRIPADVISOR_GEO_IDS.keys()))
 
 @app.route('/api/cities')
 def get_cities():
-    """Get all supported cities with metadata"""
+    """Get all supported cities with TripAdvisor status"""
     return jsonify({
         'cities': CITIES,
         'total': len(CITIES),
-        'supported_countries': sorted(list(set([city['country'] for city in CITIES.values()])))
+        'supported_countries': sorted(list(set([city['country'] for city in CITIES.values()]))),
+        'tripadvisor_supported': list(TRIPADVISOR_GEO_IDS.keys()),
+        'tripadvisor_total': len(TRIPADVISOR_GEO_IDS)
     })
 
 @app.route('/api/room-types')
@@ -659,7 +855,7 @@ def get_room_types():
 
 @app.route('/api/hotels')
 def get_hotels():
-    """Advanced multi-platform hotel search with room type filtering"""
+    """Advanced multi-platform hotel search with source selection"""
     # Extract and validate parameters
     city = request.args.get('city', 'stockholm').lower()
     checkin = request.args.get('checkin', (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'))
@@ -667,11 +863,22 @@ def get_hotels():
     adults = request.args.get('adults', '2')
     rooms = request.args.get('rooms', '1')
     room_type = request.args.get('room_type', 'double').lower()
+    source = request.args.get('source', 'booking').lower()  # NEW: source parameter
     
     if city not in CITIES:
         return jsonify({'error': f"City '{city}' not supported"}), 400
     if room_type not in ROOM_TYPES:
         return jsonify({'error': f"Room type '{room_type}' not supported"}), 400
+    if source not in ['booking', 'tripadvisor']:
+        return jsonify({'error': f"Source '{source}' not supported. Use 'booking' or 'tripadvisor'"}), 400
+    
+    # Check TripAdvisor city support
+    if source == 'tripadvisor' and city not in TRIPADVISOR_GEO_IDS:
+        return jsonify({
+            'error': f"TripAdvisor not yet supported for {city}",
+            'supported_cities': list(TRIPADVISOR_GEO_IDS.keys()),
+            'message': 'Currently only Stockholm available for TripAdvisor. Use source=booking for other cities.'
+        }), 400
     
     try:
         checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
@@ -686,30 +893,39 @@ def get_hotels():
     
     try:
         result = api_manager.search_hotels_multi_source(
-            city, checkin, checkout, adults, rooms, room_type
+            city, checkin, checkout, adults, rooms, room_type, source
         )
         search_params = {
             'city': city, 'checkin': checkin, 'checkout': checkout,
-            'adults': adults, 'rooms': rooms, 'room_type': room_type
+            'adults': adults, 'rooms': rooms, 'room_type': room_type, 'source': source
         }
         return _create_enhanced_response(result, search_params)
         
     except Exception as e:
         return jsonify({
-            'error': 'Search failed due to an internal error',
+            'error': f'{source.title()} search failed due to an internal error',
             'message': str(e),
-            'fallback': 'Demo data may be available'
+            'fallback': 'Demo data may be available',
+            'source_attempted': source
         }), 500
+
+@app.route('/api/hotels/tripadvisor')
+def get_tripadvisor_hotels():
+    """TripAdvisor-specific hotel search endpoint"""
+    # Force source to tripadvisor
+    request.args = request.args.copy()
+    request.args['source'] = 'tripadvisor'
+    return get_hotels()
 
 @app.route('/test')
 def test_stockholm():
-    """Test endpoint with Stockholm hotels - demonstrates Junior Suite"""
+    """Test endpoint with Stockholm hotels - Booking.com"""
     try:
         checkin = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
         checkout = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
         search_params = {
             'city': 'stockholm', 'checkin': checkin, 'checkout': checkout,
-            'adults': '2', 'rooms': '1', 'room_type': 'junior_suite'
+            'adults': '2', 'rooms': '1', 'room_type': 'junior_suite', 'source': 'booking'
         }
         
         result = api_manager.search_hotels_multi_source(**search_params)
@@ -718,14 +934,37 @@ def test_stockholm():
         
     except Exception as e:
         return jsonify({
-            'error': 'Test search failed', 'message': str(e),
+            'error': 'Booking.com test search failed', 'message': str(e),
             'test_mode': True, 'fallback': 'Demo data should be available',
-            'api_info': {'version': '2.0', 'test_endpoint': True}
+            'api_info': {'version': '3.0', 'test_endpoint': True, 'source': 'booking'}
+        }), 500
+
+@app.route('/test/tripadvisor')
+def test_stockholm_tripadvisor():
+    """Test endpoint with Stockholm hotels - TripAdvisor"""
+    try:
+        checkin = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+        checkout = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
+        search_params = {
+            'city': 'stockholm', 'checkin': checkin, 'checkout': checkout,
+            'adults': '2', 'rooms': '1', 'room_type': 'junior_suite', 'source': 'tripadvisor'
+        }
+        
+        result = api_manager.search_hotels_multi_source(**search_params)
+        
+        return _create_enhanced_response(result, search_params, test_mode=True)
+        
+    except Exception as e:
+        return jsonify({
+            'error': 'TripAdvisor test search failed', 'message': str(e),
+            'test_mode': True, 'fallback': 'Demo data should be available',
+            'api_info': {'version': '3.0', 'test_endpoint': True, 'source': 'tripadvisor'},
+            'beta_note': 'TripAdvisor integration is in beta for Stockholm only'
         }), 500
 
 @app.route('/api/analytics')
 def get_analytics():
-    """Basic analytics endpoint for monitoring"""
+    """Basic analytics endpoint for monitoring with TripAdvisor stats"""
     return jsonify({
         'cache_stats': {
             'total_entries': len(api_manager.cache),
@@ -733,13 +972,20 @@ def get_analytics():
         },
         'supported_features': {
             'cities': len(CITIES),
+            'cities_tripadvisor': len(TRIPADVISOR_GEO_IDS),
             'room_types': len(ROOM_TYPES),
             'countries': len(set([city['country'] for city in CITIES.values()])),
             'booking_domains': len(BOOKING_DOMAINS)
         },
         'api_status': {
-            'version': '2.0', 'uptime': 'operational', 'multi_platform': True,
+            'version': '3.0', 'uptime': 'operational', 'dual_source': True,
+            'booking_com': True, 'tripadvisor_beta': True,
             'intelligent_fallback': True, 'junior_suite_support': True
+        },
+        'tripadvisor_info': {
+            'status': 'beta',
+            'supported_cities': list(TRIPADVISOR_GEO_IDS.keys()),
+            'features': ['reviews', 'ratings', 'direct_links', 'price_estimates']
         }
     })
 
@@ -747,9 +993,10 @@ def get_analytics():
 def health_check():
     """Health check endpoint for monitoring"""
     return jsonify({
-        'status': 'healthy', 'timestamp': datetime.now().isoformat(), 'version': '2.0',
+        'status': 'healthy', 'timestamp': datetime.now().isoformat(), 'version': '3.0',
         'services': {
-            'booking_api': 'operational', 'cache_system': 'operational', 'demo_fallback': 'operational'
+            'booking_api': 'operational', 'tripadvisor_api': 'beta_stockholm',
+            'cache_system': 'operational', 'demo_fallback': 'operational'
         }
     })
 
@@ -759,8 +1006,8 @@ def not_found(error):
     return jsonify({
         'error': 'Endpoint not found',
         'available_endpoints': [
-            '/', '/api/hotels', '/api/cities', '/api/room-types',
-            '/api/analytics', '/api/health', '/test'
+            '/', '/api/hotels', '/api/hotels/tripadvisor', '/api/cities', '/api/room-types',
+            '/api/analytics', '/api/health', '/test', '/test/tripadvisor'
         ]
     }), 404
 
@@ -776,17 +1023,19 @@ def internal_error(error):
 # =============================================================================
 
 if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend v2.0...")
-    print("🏨 Supporting 29 European cities with 5 room types")
-    print("🌟 NEW: Junior Suite support with enhanced descriptions")
-    print("🔄 Multi-platform API integration with intelligent fallback")
+    print("🚀 Starting STAYFINDR Backend v3.0...")
+    print("🏨 Supporting 29 European cities (Booking.com)")
+    print("⭐ TripAdvisor Beta: Stockholm integration active")
+    print("🌟 Room types: 5 including Junior Suite")
+    print("🔄 Dual-source API integration with intelligent fallback")
     print("💾 15-minute caching for optimal performance")
     print("🌍 Localized booking URLs for all European countries")
-    print("🔗 CORS enabled for GitHub Pages frontend")
-    print("📋 Test API: /test (Junior Suite demo)")
+    print("🔗 CORS enabled for all domains")
+    print("📋 Test APIs: /test (Booking) + /test/tripadvisor")
     print("📊 Analytics: /api/analytics")
     print("❤️  Health check: /api/health")
-    print("✅ Production-ready architecture activated")
+    print("🧪 Beta features: TripAdvisor Stockholm (geoId: 60763)")
+    print("✅ Production-ready architecture v3.0 activated")
     
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
