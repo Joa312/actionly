@@ -1,208 +1,61 @@
-# STAYFINDR BACKEND v3.1 - Real TripAdvisor Stockholm Hotels
-# Fixed: Real hotel names and data instead of demo data
+# STAYFINDR BACKEND - European Hotel Search Engine
+# Flask backend with RapidAPI Booking.com integration
+# FIXED: Hotel name-based booking URLs + Room Type Filter with Junior Suite
 
 import os
-import json
-import time
-import random
-from datetime import datetime, timedelta
-from urllib.parse import quote_plus, urlencode
-import hashlib
-import requests
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
+import requests
+import json
+import time
+from datetime import datetime
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
 CORS(app)
 
 # RapidAPI Configuration
 RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
-RAPIDAPI_HOST_BOOKING = "booking-com18.p.rapidapi.com"
-RAPIDAPI_HOST_TRIPADVISOR = "tripadvisor16.p.rapidapi.com"
+RAPIDAPI_HOST = "booking-com18.p.rapidapi.com"
 
-# Real Stockholm Hotels from TripAdvisor
-REAL_STOCKHOLM_HOTELS = [
-    {
-        "name": "Grand Hôtel Stockholm",
-        "address": "Södra Blasieholmshamnen 8, Stockholm",
-        "rating": 4.5,
-        "tripadvisor_id": "89392",
-        "coordinates": [59.3289, 18.0739],
-        "price_range": [450, 850],
-        "description": "Luxury waterfront hotel with Nobel Prize history"
+# Room Type Configurations
+ROOM_TYPES = {
+    'single': {
+        'name': 'Single Room',
+        'description': 'Single Room - Perfect for solo travelers',
+        'guests': 1,
+        'keywords': ['single', 'solo', '1 person', 'individual'],
+        'booking_params': {'group_adults': 1, 'no_rooms': 1}
     },
-    {
-        "name": "Hotel Diplomat Stockholm",
-        "address": "Strandvägen 7C, Stockholm", 
-        "rating": 4.3,
-        "tripadvisor_id": "89373",
-        "coordinates": [59.3316, 18.0831],
-        "price_range": [320, 580],
-        "description": "Art Nouveau hotel on prestigious Strandvägen"
+    'double': {
+        'name': 'Double Room',
+        'description': 'Double Room - Ideal for couples',
+        'guests': 2,
+        'keywords': ['double', 'couple', 'twin', 'queen', 'king'],
+        'booking_params': {'group_adults': 2, 'no_rooms': 1}
     },
-    {
-        "name": "Scandic Continental",
-        "address": "Vasagatan 22, Stockholm",
-        "rating": 4.2,
-        "tripadvisor_id": "89425",
-        "coordinates": [59.3309, 18.0597],
-        "price_range": [280, 450],
-        "description": "Central station location with modern amenities"
+    'family': {
+        'name': 'Family Room',
+        'description': 'Family Room - Great for families with children',
+        'guests': 4,
+        'keywords': ['family', 'children', 'kids', 'triple', 'quad'],
+        'booking_params': {'group_adults': 4, 'no_rooms': 1, 'group_children': 2}
     },
-    {
-        "name": "Clarion Hotel Sign",
-        "address": "Östra Järnvägsgatan 35, Stockholm",
-        "rating": 4.4,
-        "tripadvisor_id": "1208847",
-        "coordinates": [59.3347, 18.0534],
-        "price_range": [350, 620],
-        "description": "Design hotel with panoramic city views"
+    'junior_suite': {
+        'name': 'Junior Suite',
+        'description': 'Junior Suite - Spacious room with sitting area',
+        'guests': 2,
+        'keywords': ['junior suite', 'junior', 'suite', 'sitting area', 'upgraded', 'spacious'],
+        'booking_params': {'group_adults': 2, 'no_rooms': 1, 'room_type': 'junior_suite'}
     },
-    {
-        "name": "Elite Hotel Stockholm Plaza",
-        "address": "Birger Jarlsgatan 29, Stockholm",
-        "rating": 4.1,
-        "tripadvisor_id": "89415",
-        "coordinates": [59.3375, 18.0699],
-        "price_range": [300, 520],
-        "description": "Historic hotel in the heart of Stockholm"
-    },
-    {
-        "name": "Radisson Blu Royal Viking Hotel",
-        "address": "Vasagatan 1, Stockholm",
-        "rating": 4.2,
-        "tripadvisor_id": "89422",
-        "coordinates": [59.3315, 18.0582],
-        "price_range": [290, 480],
-        "description": "Classic hotel next to Central Station"
-    },
-    {
-        "name": "Hotel Birger Jarl",
-        "address": "Tulegatan 8, Stockholm",
-        "rating": 4.0,
-        "tripadvisor_id": "89367",
-        "coordinates": [59.3422, 18.0624],
-        "price_range": [250, 420],
-        "description": "Boutique hotel in elegant Östermalm"
-    },
-    {
-        "name": "Biz Apartment Hammarby Sjöstad",
-        "address": "Fredriksbergsvägen 24, Stockholm",
-        "rating": 4.3,
-        "tripadvisor_id": "2468915",
-        "coordinates": [59.3019, 18.0990],
-        "price_range": [200, 380],
-        "description": "Modern apartments in waterfront district"
-    },
-    {
-        "name": "Elite Hotel Carolina Tower",
-        "address": "Södra Kanalkajen 15, Stockholm",
-        "rating": 4.4,
-        "tripadvisor_id": "3489012",
-        "coordinates": [59.3483, 18.0318],
-        "price_range": [320, 550],
-        "description": "Tower hotel with spectacular harbor views"
-    },
-    {
-        "name": "Best Western Kom Hotel",
-        "address": "Döbelnsgatan 17, Stockholm",
-        "rating": 3.9,
-        "tripadvisor_id": "89359",
-        "coordinates": [59.3396, 18.0625],
-        "price_range": [240, 400],
-        "description": "Comfortable hotel near shopping districts"
-    },
-    {
-        "name": "Scandic Upplandsgatan",
-        "address": "Upplandsgatan 4, Stockholm",
-        "rating": 4.1,
-        "tripadvisor_id": "1589734",
-        "coordinates": [59.3363, 18.0550],
-        "price_range": [260, 430],
-        "description": "Modern eco-friendly hotel in city center"
-    },
-    {
-        "name": "Courtyard by Marriott Stockholm Kungsholmen",
-        "address": "Rålambsvägen 6, Stockholm",
-        "rating": 4.3,
-        "tripadvisor_id": "4182753",
-        "coordinates": [59.3311, 18.0212],
-        "price_range": [340, 590],
-        "description": "Contemporary hotel on scenic Kungsholmen island"
-    },
-    {
-        "name": "Blique by Nobis",
-        "address": "Gävlegatan 18, Stockholm",
-        "rating": 4.2,
-        "tripadvisor_id": "12745816",
-        "coordinates": [59.3460, 18.0360],
-        "price_range": [310, 540],
-        "description": "Design hotel in trendy Vasastan"
-    },
-    {
-        "name": "Best Western Plus Time Hotel",
-        "address": "Vanadisvägen 12, Stockholm",
-        "rating": 4.1,
-        "tripadvisor_id": "89389",
-        "coordinates": [59.3476, 18.0493],
-        "price_range": [270, 450],
-        "description": "Stylish hotel near Odenplan"
-    },
-    {
-        "name": "Thon Partner Hotel Kungsbron",
-        "address": "Kungsbron 1, Stockholm",
-        "rating": 4.0,
-        "tripadvisor_id": "89431",
-        "coordinates": [59.3319, 18.0532],
-        "price_range": [250, 420],
-        "description": "Business hotel with conference facilities"
-    },
-    {
-        "name": "Best Western Royal Star",
-        "address": "Slottsbacken 14, Stockholm",
-        "rating": 3.8,
-        "tripadvisor_id": "89386",
-        "coordinates": [59.2762, 18.0139],
-        "price_range": [220, 380],
-        "description": "Budget-friendly hotel with good transport links"
-    },
-    {
-        "name": "Home Hotel Tapetfabriken",
-        "address": "Lilla Essingen, Stockholm",
-        "rating": 4.4,
-        "tripadvisor_id": "8971234",
-        "coordinates": [59.3051, 18.1214],
-        "price_range": [280, 480],
-        "description": "Unique hotel in converted wallpaper factory"
-    },
-    {
-        "name": "Sure Hotel by Best Western Stockholm Älvsjö",
-        "address": "Genvägen 4, Stockholm",
-        "rating": 3.7,
-        "tripadvisor_id": "89398",
-        "coordinates": [59.2809, 18.0137],
-        "price_range": [200, 350],
-        "description": "Airport area hotel with shuttle service"
-    },
-    {
-        "name": "Best Western Plus Park City Hotel",
-        "address": "Hammarby Allé 13, Stockholm",
-        "rating": 4.0,
-        "tripadvisor_id": "2156789",
-        "coordinates": [59.3016, 18.1054],
-        "price_range": [260, 440],
-        "description": "Modern hotel in developing Hammarby Sjöstad"
-    },
-    {
-        "name": "Rygerfjord Hotel & Hostel",
-        "address": "Upplandsgatan 8, Stockholm",
-        "rating": 3.9,
-        "tripadvisor_id": "2847651",
-        "coordinates": [59.3214, 18.0591],
-        "price_range": [180, 320],
-        "description": "Budget accommodation near central station"
+    'suite': {
+        'name': 'Suite/Apartment',
+        'description': 'Suite/Apartment - Luxury accommodation with separate living area',
+        'guests': 3,
+        'keywords': ['suite', 'apartment', 'luxury', 'living area', 'presidential', 'executive'],
+        'booking_params': {'group_adults': 3, 'no_rooms': 1, 'room_type': 'suite'}
     }
-]
+}
 
 # European Cities Configuration - 29 major destinations
 CITIES = {
@@ -367,95 +220,220 @@ COUNTRY_CODES = {
     'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
 }
 
-# Room type definitions with enhanced descriptions
-ROOM_TYPES = {
-    'single': {
-        'name': 'Single Room',
-        'description': 'Perfect for solo travelers',
-        'guests': 1,
-        'keywords': ['single', 'solo', 'one person', 'individual']
-    },
-    'double': {
-        'name': 'Double Room', 
-        'description': 'Ideal for couples',
-        'guests': 2,
-        'keywords': ['double', 'couple', 'two people', 'twin', 'queen', 'king']
-    },
-    'family': {
-        'name': 'Family Room',
-        'description': 'Great for families with children',
-        'guests': 4,
-        'keywords': ['family', 'triple', 'quad', 'children', 'kids', 'bunk']
-    },
-    'junior_suite': {
-        'name': 'Junior Suite',
-        'description': 'Spacious room with sitting area - upgraded comfort',
-        'guests': 2,
-        'keywords': ['junior suite', 'junior', 'suite', 'sitting area', 'upgraded', 'deluxe', 'premium']
-    },
-    'suite': {
-        'name': 'Suite/Apartment',
-        'description': 'Luxury accommodation with separate living area',
-        'guests': 3,
-        'keywords': ['suite', 'apartment', 'executive', 'presidential', 'penthouse', 'luxury']
+def get_location_id(city_query):
+    """Get Booking.com location ID for a city"""
+    url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
+    
+    querystring = {"query": city_query, "languageCode": "en"}
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST
     }
-}
+    
+    try:
+        response = requests.get(url, headers=headers, params=querystring)
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and data['data']:
+                return data['data'][0].get('id')
+    except Exception as e:
+        print(f"Error getting location ID: {e}")
+    
+    return None
 
-def generate_real_tripadvisor_hotels(city_key, room_type='double'):
-    """Generate realistic TripAdvisor hotel data using real Stockholm hotels"""
+def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
+    """Search hotels using Booking.com API"""
+    url = "https://booking-com18.p.rapidapi.com/stays/search"
     
-    if city_key != 'stockholm':
-        # For non-Stockholm cities, return empty for now (TripAdvisor beta Stockholm only)
-        return []
+    querystring = {
+        "locationId": location_id,
+        "checkinDate": checkin,
+        "checkoutDate": checkout,
+        "adults": adults,
+        "rooms": rooms,
+        "currency": "EUR"
+    }
     
-    # Select random subset of real hotels (15-20 hotels)
-    selected_hotels = random.sample(REAL_STOCKHOLM_HOTELS, min(18, len(REAL_STOCKHOLM_HOTELS)))
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST
+    }
     
-    processed_hotels = []
-    room_info = ROOM_TYPES.get(room_type, ROOM_TYPES['double'])
+    try:
+        response = requests.get(url, headers=headers, params=querystring)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"Error searching hotels: {e}")
     
-    for i, hotel_data in enumerate(selected_hotels):
-        # Generate realistic price variation within hotel's range
-        min_price, max_price = hotel_data['price_range']
-        base_price = random.randint(min_price, max_price)
-        
-        # Room type price adjustments
-        if room_type == 'junior_suite':
-            base_price = int(base_price * 1.3)  # 30% premium for junior suite
-        elif room_type == 'suite':
-            base_price = int(base_price * 1.6)  # 60% premium for suite
-        elif room_type == 'family':
-            base_price = int(base_price * 1.2)  # 20% premium for family room
-        elif room_type == 'single':
-            base_price = int(base_price * 0.8)  # 20% discount for single
+    return None
+
+def analyze_room_type_match(hotel, room_type):
+    """Analyze if hotel matches the requested room type"""
+    if room_type not in ROOM_TYPES:
+        return False
+    
+    room_config = ROOM_TYPES[room_type]
+    hotel_name = hotel.get('name', '').lower()
+    hotel_description = hotel.get('description', '').lower()
+    
+    # Check if hotel name/description contains room type keywords
+    for keyword in room_config['keywords']:
+        if keyword in hotel_name or keyword in hotel_description:
+            return True
+    
+    return False
+
+def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key, room_type):
+    """Create hotel name-based booking URL with room type for better targeting"""
+    
+    # Priority 1: Use direct hotel URL from API if available
+    direct_urls = [
+        hotel.get('url'),
+        hotel.get('link'), 
+        hotel.get('booking_url'),
+        hotel.get('hotelUrl'),
+        hotel.get('deepLink')
+    ]
+    
+    for url in direct_urls:
+        if url and 'booking.com' in str(url):
+            # Add search parameters to direct URL
+            room_params = ROOM_TYPES.get(room_type, {}).get('booking_params', {})
+            param_string = '&'.join([f"{k}={v}" for k, v in room_params.items()])
             
-        # Create TripAdvisor-style booking URL
-        hotel_name_encoded = quote_plus(hotel_data['name'])
-        booking_url = f"https://www.tripadvisor.com/Hotels-g189852-Stockholm_Sweden-Hotels.html?q={hotel_name_encoded}&room_type={room_type}"
+            if '?' in url:
+                return f"{url}&checkin={checkin}&checkout={checkout}&{param_string}"
+            else:
+                return f"{url}?checkin={checkin}&checkout={checkout}&{param_string}"
+    
+    # Priority 2: Create hotel name-based search URL (IMPROVED METHOD)
+    hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
+    hotel_name = hotel.get('name', 'Hotel')
+    
+    if hotel_id and hotel_name:
+        # Get country code for the city
+        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+        
+        # Get room type specific parameters
+        room_config = ROOM_TYPES.get(room_type, ROOM_TYPES['double'])
+        room_params = room_config['booking_params']
+        
+        # Encode hotel name properly for URL
+        hotel_name_encoded = quote_plus(hotel_name)
+        
+        # Create hotel name-based search URL similar to your example
+        base_params = {
+            'ss': hotel_name,  # Hotel search string
+            'dest_id': hotel_id,  # Hotel destination ID
+            'dest_type': 'hotel',  # Specify it's a hotel
+            'checkin': checkin,
+            'checkout': checkout,
+            'search_selected': 'true'
+        }
+        
+        # Add room type specific parameters
+        base_params.update(room_params)
+        
+        # Build URL parameters
+        params_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in base_params.items()])
+        
+        return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
+    
+    # Priority 3: Fallback to hotel ID-based URL
+    if hotel_id:
+        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+        room_config = ROOM_TYPES.get(room_type, ROOM_TYPES['double'])
+        room_params = room_config['booking_params']
+        param_string = '&'.join([f"{k}={v}" for k, v in room_params.items()])
+        
+        return f"https://www.booking.com/hotel/{country_code.split('-')[0]}/?hotel_id={hotel_id}&checkin={checkin}&checkout={checkout}&{param_string}"
+    
+    # Priority 4: Generic search by hotel name in the city
+    hotel_name = hotel.get('name', '').replace(' ', '+')
+    city_name = city_info['name'].replace(' ', '+')
+    country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+    room_config = ROOM_TYPES.get(room_type, ROOM_TYPES['double'])
+    room_params = room_config['booking_params']
+    param_string = '&'.join([f"{k}={v}" for k, v in room_params.items()])
+    
+    return f"https://www.booking.com/searchresults.{country_code}.html?ss={hotel_name}+{city_name}&checkin={checkin}&checkout={checkout}&{param_string}"
+
+def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms, city_key, room_type):
+    """Process and format hotel data with proper booking URLs and room type analysis"""
+    processed_hotels = []
+    
+    for i, hotel in enumerate(hotels_data):
+        # Extract hotel information
+        hotel_name = hotel.get('name', 'Unknown Hotel')
+        
+        # Analyze room type match
+        room_match = analyze_room_type_match(hotel, room_type)
+        
+        # Get real coordinates if available, otherwise use city center with offset
+        latitude = hotel.get('latitude')
+        longitude = hotel.get('longitude')
+        
+        if latitude and longitude:
+            coordinates = [float(latitude), float(longitude)]
+        else:
+            # Fallback: spread around city center
+            base_lat, base_lng = city_info['coordinates']
+            coordinates = [
+                base_lat + (i * 0.01) - 0.05,
+                base_lng + (i * 0.01) - 0.05
+            ]
+        
+        # Extract pricing information
+        price = 'N/A'
+        if 'priceBreakdown' in hotel:
+            price_info = hotel['priceBreakdown'].get('grossPrice', {})
+            if 'value' in price_info:
+                # Convert to per night if total price
+                total_price = price_info['value']
+                try:
+                    # Estimate per night (assuming booking is for multiple nights)
+                    from datetime import datetime
+                    checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
+                    checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
+                    nights = (checkout_date - checkin_date).days
+                    if nights > 0:
+                        price = int(total_price / nights)
+                    else:
+                        price = total_price
+                except:
+                    price = int(total_price / 7)  # Fallback: assume 7 nights
+        elif 'price' in hotel:
+            price = hotel['price']
+        
+        # Extract rating
+        rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
+        if rating:
+            rating = float(rating) / 2 if rating > 5 else float(rating)  # Normalize to 5-point scale
+        else:
+            rating = 4.0
+        
+        # Extract address
+        address = hotel.get('address', city_info['name'])
+        
+        # Create optimized booking URL with hotel name and room type
+        booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key, room_type)
         
         processed_hotel = {
-            'id': f"tripadvisor_stockholm_{i}",
-            'name': hotel_data['name'],
-            'address': hotel_data['address'],
-            'coordinates': hotel_data['coordinates'],
-            'price': base_price,
-            'rating': hotel_data['rating'],
+            'id': hotel.get('id') or hotel.get('hotel_id') or f"hotel_{i}",
+            'name': hotel_name,
+            'address': address,
+            'coordinates': coordinates,
+            'price': price,
+            'rating': rating,
             'booking_url': booking_url,
-            'room_type': room_info['name'],
-            'room_description': room_info['description'],
-            'source': 'tripadvisor',
-            'description': hotel_data.get('description', ''),
-            'tripadvisor_id': hotel_data['tripadvisor_id']
+            'room_type_match': room_match,
+            'room_type': ROOM_TYPES.get(room_type, {}).get('name', 'Hotel Room')
         }
         
         processed_hotels.append(processed_hotel)
     
-    # Sort by price for better user experience
-    processed_hotels.sort(key=lambda x: x['price'])
-    
     return processed_hotels
-
-# Rest of the backend code remains the same but uses the new generate_real_tripadvisor_hotels function
 
 @app.route('/')
 def home():
@@ -464,7 +442,7 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🏨 STAYFINDR Backend API v3.1</title>
+        <title>🏨 STAYFINDR Backend API</title>
         <style>
             body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
             h1 { color: #2c3e50; }
@@ -472,134 +450,152 @@ def home():
             .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
             .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
             .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
-            .new { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 8px; }
+            .room-types { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 20px 0; }
+            .room-type { background: #fff3e0; padding: 10px; border-radius: 8px; }
         </style>
     </head>
     <body>
-        <h1>🏨 STAYFINDR Backend API v3.1</h1>
-        <p>Flask backend for European hotel search with real TripAdvisor data</p>
+        <h1>🏨 STAYFINDR Backend API</h1>
+        <p>Flask backend for European hotel search with room type filtering and hotel name-based booking URLs</p>
         
-        <div class="new">
-            <strong>🆕 NEW: Real TripAdvisor Stockholm Hotels</strong><br>
-            Now using actual Stockholm hotel names, addresses, and realistic pricing from TripAdvisor database
+        <div class="feature">
+            <strong>✅ NEW: Room Type Filter with Junior Suite</strong><br>
+            Search for specific room types including Single, Double, Family, Junior Suite, and Suite/Apartment rooms
         </div>
         
         <div class="feature">
-            <strong>✅ Features:</strong><br>
-            • Hotel name-based booking URLs for better targeting<br>
-            • Room type filtering with Junior Suite support<br>
-            • Multi-source integration: Booking.com + TripAdvisor<br>
-            • Real Stockholm hotel data from TripAdvisor<br>
-            • Currency harmonization (EUR standard)
+            <strong>✅ Hotel Name-Based Booking URLs</strong><br>
+            CTA buttons now use hotel names for better targeting and SEO, similar to native Booking.com searches
         </div>
         
         <h2>Available endpoints:</h2>
         <div class="endpoint">
             <strong>/api/hotels</strong> - Get hotels for a city<br>
-            Parameters: city, checkin, checkout, adults, rooms, room_type<br>
-            <em>Enhanced with real TripAdvisor data for Stockholm</em>
-        </div>
-        <div class="endpoint">
-            <strong>/test/tripadvisor</strong> - Test Stockholm real TripAdvisor hotels<br>
-            <em>Now returns actual hotel names like "Grand Hôtel Stockholm", "Hotel Diplomat"</em>
-        </div>
-        <div class="endpoint">
-            <strong>/test</strong> - Test Stockholm Booking.com hotels
+            Parameters: city, room_type, checkin, checkout, adults, rooms<br>
+            <em>Now with room type filtering and improved hotel name-based URLs</em>
         </div>
         <div class="endpoint">
             <strong>/api/cities</strong> - List all 29 cities
         </div>
+        <div class="endpoint">
+            <strong>/api/room-types</strong> - List all room types with Junior Suite
+        </div>
+        <div class="endpoint">
+            <strong>/test</strong> - Test Stockholm hotels with room type filtering
+        </div>
         
-        <h2>TripAdvisor Beta Cities:</h2>
+        <h2>Room Types supported:</h2>
+        <div class="room-types">
+            {% for room_key, room_info in room_types.items() %}
+            <div class="room-type">
+                <strong>{{ room_info.name }}</strong><br>
+                {{ room_info.description }}<br>
+                <em>{{ room_info.guests }} guests</em>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <h2>Cities supported:</h2>
         <div class="cities">
-            <div class="city">Stockholm (Real Data)</div>
-            <div class="city">Other cities: Coming Soon</div>
+            {% for city in cities %}
+            <div class="city">{{ city }}</div>
+            {% endfor %}
         </div>
     </body>
     </html>
-    ''')
+    ''', cities=list(CITIES.keys()), room_types=ROOM_TYPES)
 
-@app.route('/test/tripadvisor')
-def test_stockholm_tripadvisor():
-    """Test Stockholm hotels from real TripAdvisor data"""
-    
-    # Get tomorrow and day after for test dates
-    tomorrow = datetime.now() + timedelta(days=1)
-    day_after = datetime.now() + timedelta(days=2)
-    checkin = tomorrow.strftime('%Y-%m-%d')
-    checkout = day_after.strftime('%Y-%m-%d')
-    
-    print(f"🔍 Testing TripAdvisor Stockholm real hotels: {checkin} to {checkout}")
-    
-    try:
-        # Generate real TripAdvisor hotel data for Stockholm
-        hotels = generate_real_tripadvisor_hotels('stockholm', 'junior_suite')
-        
-        if hotels:
-            return jsonify({
-                'city': 'Stockholm, Sweden',
-                'hotels': hotels,
-                'total_found': len(hotels),
-                'search_params': {
-                    'city_key': 'stockholm',
-                    'checkin': checkin,
-                    'checkout': checkout,
-                    'adults': '2',
-                    'rooms': '1',
-                    'room_type': 'junior_suite',
-                    'source': 'tripadvisor'
-                },
-                'room_filter': {
-                    'enabled': True,
-                    'selected_type': 'Junior Suite',
-                    'description': 'Spacious room with sitting area - upgraded comfort',
-                    'guests': 2
-                },
-                'api_info': {
-                    'version': '3.1',
-                    'source': 'tripadvisor_real_data',
-                    'test_mode': False,
-                    'tripadvisor_beta': True,
-                    'supported_cities_tripadvisor': ['stockholm'],
-                    'test_description': 'Real TripAdvisor Stockholm hotels',
-                    'url_type': 'hotel_name_based_with_room_filter',
-                    'localization': 'enabled',
-                    'cached': 'real_time_generated'
-                }
-            })
-        else:
-            return jsonify({
-                'error': 'No real TripAdvisor hotels available for Stockholm',
-                'city': 'Stockholm, Sweden',
-                'api_info': {
-                    'version': '3.1',
-                    'source': 'tripadvisor_real_data',
-                    'error_details': 'Hotel generation failed'
-                }
-            }), 404
-            
-    except Exception as e:
-        print(f"❌ TripAdvisor real data error: {e}")
-        return jsonify({
-            'error': f'TripAdvisor real data failed: {str(e)}',
-            'fallback': 'Check hotel database',
-            'api_info': {
-                'version': '3.1',
-                'source': 'tripadvisor_real_data',
-                'test_mode': True
-            }
-        }), 500
+@app.route('/api/cities')
+def get_cities():
+    """Get all supported cities"""
+    return jsonify({
+        'cities': CITIES,
+        'total': len(CITIES)
+    })
 
-# Include all other existing endpoints (booking.com, cities, etc.)
-# [Rest of code remains the same as previous version]
+@app.route('/api/room-types')
+def get_room_types():
+    """Get all supported room types"""
+    return jsonify({
+        'room_types': ROOM_TYPES,
+        'total': len(ROOM_TYPES)
+    })
+
+@app.route('/api/hotels')
+def get_hotels():
+    """Get hotels for a specific city with room type filtering and hotel name-based booking URLs"""
+    city = request.args.get('city', 'stockholm')
+    room_type = request.args.get('room_type', 'double')
+    checkin = request.args.get('checkin', '2025-07-14')
+    checkout = request.args.get('checkout', '2025-07-21')
+    adults = request.args.get('adults', '2')
+    rooms = request.args.get('rooms', '1')
+    
+    if city not in CITIES:
+        return jsonify({'error': f'City {city} not supported'}), 400
+    
+    if room_type not in ROOM_TYPES:
+        return jsonify({'error': f'Room type {room_type} not supported'}), 400
+    
+    city_info = CITIES[city]
+    room_config = ROOM_TYPES[room_type]
+    
+    # Get location ID for the city
+    location_id = get_location_id(city_info['search_query'])
+    
+    if not location_id:
+        return jsonify({'error': f'Could not find location ID for {city}'}), 404
+    
+    # Search hotels
+    hotels_data = search_hotels_booking_api(location_id, checkin, checkout, adults, rooms)
+    
+    if not hotels_data or 'data' not in hotels_data:
+        return jsonify({'error': 'No hotels found'}), 404
+    
+    # Process hotel data with room type filtering and hotel name-based booking URLs - limit to top 50
+    processed_hotels = process_hotel_data(
+        hotels_data['data'][:50], 
+        city_info, 
+        checkin, 
+        checkout, 
+        adults, 
+        rooms,
+        city,  # Pass city key for country code lookup
+        room_type  # Pass room type for filtering and URL generation
+    )
+    
+    return jsonify({
+        'city': city_info['name'],
+        'hotels': processed_hotels,
+        'total_found': len(processed_hotels),
+        'search_params': {
+            'checkin': checkin,
+            'checkout': checkout, 
+            'adults': adults,
+            'rooms': rooms,
+            'room_type': room_type
+        },
+        'room_filter': 'enabled',
+        'room_type': room_type,
+        'room_description': room_config['description'],
+        'booking_optimization': 'enabled',
+        'localization': 'enabled',
+        'url_type': 'hotel_name_based'
+    })
+
+@app.route('/test')
+def test_stockholm():
+    """Test endpoint with Stockholm hotels and room type filtering"""
+    return get_hotels()
 
 if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend v3.1...")
+    print("🚀 Starting STAYFINDR Backend...")
     print("🏨 Supporting 29 European cities")
-    print("🆕 NEW: Real TripAdvisor Stockholm hotel data")
+    print("🛏️ NEW: Room Type Filter with Junior Suite")
+    print("🌍 Hotel name-based booking URLs")
     print("🔗 Frontend will connect to: http://localhost:5000")
-    print("📋 Test real TripAdvisor: http://localhost:5000/test/tripadvisor")
-    print("✅ Enhanced with authentic hotel names and data")
+    print("📋 Test API: http://localhost:5000/test")
+    print("✅ Complete room type filtering with localized booking URLs")
     
     # Use PORT environment variable for deployment (Render, Heroku, etc.)
     port = int(os.environ.get('PORT', 5000))
