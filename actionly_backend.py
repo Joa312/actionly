@@ -98,7 +98,6 @@ def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
 
 def process_booking_hotels(hotels_data, city_info, search_params):
     processed = []
-    # REVISION: Broken down the "for" loop to prevent copy-paste errors.
     hotels_to_process = hotels_data[:20]
     for i, hotel in enumerate(hotels_to_process):
         price = 'N/A'
@@ -129,7 +128,6 @@ def process_booking_hotels(hotels_data, city_info, search_params):
 
 def process_tripadvisor_hotels(hotels_data, city_info, search_params):
     processed = []
-    # REVISION: Broken down the "for" loop to prevent copy-paste errors.
     hotels_to_process = hotels_data[:15]
     for i, hotel in enumerate(hotels_to_process):
         price = 'N/A'
@@ -173,4 +171,110 @@ def create_booking_url(hotel, city_info, params):
 def get_demo_hotels(city_info, room_type, source):
     logging.warning(f"Using fallback DEMO data for {city_info['name']} from {source}.")
     demo_templates = [
-        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 250, '
+        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 250, 'rating': 4.5},
+        {'name': f'Central Plaza {city_info["name"].split(",")[0]}', 'price': 150, 'rating': 4.1},
+        {'name': f'Riverside Inn {city_info["name"].split(",")[0]}', 'price': 120, 'rating': 3.9}
+    ]
+    processed_demos = []
+    for i, demo in enumerate(demo_templates):
+        processed_demos.append({
+            'id': f"demo_{source}_{i}", 'name': demo['name'], 'address': city_info['name'],
+            'coordinates': [city_info['coordinates'][0] + (i * 0.01 - 0.01), city_info['coordinates'][1] + (i * 0.01 - 0.01)],
+            'price': demo['price'], 'rating': demo['rating'], 'source': source,
+            'room_type': ROOM_TYPES.get(room_type, {}).get('name'),
+            'booking_url': f"https://www.{source.split('.')[0]}.com/"
+        })
+    return processed_demos
+
+# --- Unified API Route Handler ---
+
+def handle_hotel_search(source):
+    today = datetime.now()
+    params = {
+        'city': request.args.get('city', 'stockholm').lower(),
+        'room_type': request.args.get('room_type', 'double').lower(),
+        'checkin': request.args.get('checkin', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
+        'checkout': request.args.get('checkout', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
+        'adults': request.args.get('adults', '2'),
+        'rooms': request.args.get('rooms', '1')
+    }
+    if params['city'] not in CITIES:
+        return jsonify({'error': f"City '{params['city']}' not supported"}), 400
+    if params['room_type'] not in ROOM_TYPES:
+        return jsonify({'error': f"Room type '{params['room_type']}' not supported"}), 400
+
+    city_info = CITIES[params['city']]
+    processed_hotels = []
+    data_source = 'live_api'
+
+    try:
+        api_data = None
+        if source == 'booking':
+            location_id = get_booking_location_id(city_info['search_query'])
+            if location_id:
+                api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
+                if api_data:
+                    processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
+        
+        elif source == 'tripadvisor':
+            geo_id = city_info.get('tripadvisor_id')
+            if geo_id:
+                api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
+                if api_data:
+                    processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
+
+        if not processed_hotels:
+            data_source = 'demo_fallback'
+            processed_hotels = get_demo_hotels(city_info, params['room_type'], source)
+
+        return jsonify({
+            'city': city_info['name'],
+            'hotels': processed_hotels,
+            'total_found': len(processed_hotels),
+            'search_params': params,
+            'source': source,
+            'data_source': data_source
+        })
+
+    except Exception as e:
+        logging.critical(f"Unhandled exception in handle_hotel_search for source '{source}': {e}", exc_info=True)
+        return jsonify({'error': 'An unexpected internal server error occurred.'}), 500
+
+# --- Flask Routes ---
+
+@app.route('/')
+def home():
+    return render_template_string('<h1>STAYFINDR Backend v5.4</h1><p>Production-ready. All systems operational.</p>')
+
+@app.route('/api/cities')
+def get_cities_route():
+    return jsonify({'cities': CITIES, 'total': len(CITIES)})
+
+@app.route('/api/room-types')
+def get_room_types_route():
+    return jsonify({'room_types': ROOM_TYPES, 'total': len(ROOM_TYPES)})
+
+@app.route('/api/hotels/booking')
+def get_booking_hotels_route():
+    return handle_hotel_search(source='booking')
+
+@app.route('/api/hotels/tripadvisor')
+def get_tripadvisor_hotels_route():
+    return handle_hotel_search(source='tripadvisor')
+
+@app.route('/api/hotels')
+def get_hotels_legacy_route():
+    return handle_hotel_search(source='booking')
+
+@app.route('/test')
+def test_endpoint_route():
+    return jsonify({'status': 'STAYFINDR Backend v5.4 Active', 'caching': 'enabled', 'logging': 'enabled'})
+
+# --- Application Startup ---
+
+if __name__ == '__main__':
+    logging.info("🚀 Starting STAYFINDR Backend v5.4...")
+    logging.info("▶️ Features: Unified Logic, Caching, Logging, Dual-Source, Secure, Robust Lines.")
+    is_production = os.environ.get('FLASK_ENV') == 'production'
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=not is_production, host='0.0.0.0', port=port)
