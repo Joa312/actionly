@@ -54,6 +54,7 @@ def load_cities_from_csv(filename='cities.csv'):
     """
     cities = {}
     try:
+        # Use utf-8-sig to handle potential BOM (Byte Order Mark) from Excel
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
             reader = csv.DictReader(infile)
             for i, row in enumerate(reader):
@@ -62,7 +63,7 @@ def load_cities_from_csv(filename='cities.csv'):
                     logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
                     continue
 
-                # REVISION: Added robust error handling for float conversion.
+                # Added robust error handling for float conversion.
                 lat, lon = 0.0, 0.0 # Default coordinates
                 try:
                     lat = float(row.get('lat'))
@@ -229,6 +230,8 @@ def get_demo_hotels(city_info, room_type, source):
         
     return processed_demos
 
+# --- Unified API Route Handler ---
+
 def handle_hotel_search(source):
     today = datetime.now()
     params = {
@@ -300,3 +303,20 @@ def get_booking_hotels_route():
 
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels_route():
+    return handle_hotel_search(source='tripadvisor')
+
+@app.route('/api/hotels')
+def get_hotels_legacy_route():
+    return handle_hotel_search(source='booking')
+
+@app.route('/test')
+def test_endpoint_route():
+    return jsonify({'status': 'STAYFINDR Backend v6.2 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
+
+# --- Application Startup ---
+if __name__ == '__main__':
+    logging.info("🚀 Starting STAYFINDR Backend v6.2...")
+    logging.info("▶️ Now loading city data from cities.csv.")
+    is_production = os.environ.get('FLASK_ENV') == 'production'
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=not is_production, host='0.0.0.0', port=port)
