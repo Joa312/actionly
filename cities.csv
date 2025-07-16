@@ -1,72 +1,72 @@
-﻿key,name,lat,lon,search_query,country,tripadvisor_id
-"alicante,""Alicante, Spain"",38.3452,-0.4815,Alicante ES,es,187525"
-"amsterdam,""Amsterdam, Netherlands"",52.377956,4.89707,Amsterdam NL,nl,188590"
-"ankara,""Ankara, Turkey"",39.925533,32.866287,Ankara TR,tr,293974"
-"antalya,""Antalya, Turkey"",36.8969,30.7133,Antalya TR,tr,297962"
-"athens,""Athens, Greece"",37.9838,23.7275,Athens GR,gr,189398"
-"barcelona,""Barcelona, Spain"",41.3851,2.1734,Barcelona ES,es,187497"
-"belgrade,""Belgrade, Serbia"",44.7866,20.4489,Belgrade RS,rs,304105"
-"bern,""Bern, Switzerland"",46.948,7.4474,Bern CH,ch,188052"
-"berlin,""Berlin, Germany"",52.52,13.405,Berlin DE,de,187323"
-"bergamo,""Bergamo, Italy"",45.695,9.67,Bergamo IT,it,187830"
-"birmingham,""Birmingham, UK"",52.4862,-1.8904,Birmingham GB,gb,186400"
-"bologna,""Bologna, Italy"",44.4949,11.3426,Bologna IT,it,187801"
-"brussels,""Brussels, Belgium"",50.8503,4.3517,Brussels BE,be,188644"
-"bucharest,""Bucharest, Romania"",44.4268,26.1025,Bucharest RO,ro,274881"
-"budapest,""Budapest, Hungary"",47.4979,19.0402,Budapest HU,hu,274887"
-"catania,""Catania, Italy"",37.5079,15.083,Catania IT,it,187888"
-"cologne,""Cologne, Germany"",50.9375,6.9603,Cologne DE,de,187371"
-"copenhagen,""Copenhagen, Denmark"",55.6761,12.5683,Copenhagen DK,dk,189541"
-"corfu,""Corfu, Greece"",39.6243,19.9217,Corfu GR,gr,189458"
-"dublin,""Dublin, Ireland"",53.3498,-6.2603,Dublin IE,ie,186591"
-"dubrovnik,""Dubrovnik, Croatia"",42.6507,18.0944,Dubrovnik HR,hr,304023"
-"dusseldorf,""Düsseldorf, Germany"",51.2277,6.7735,Düsseldorf DE,de,187340"
-"edinburgh,""Edinburgh, UK"",55.9533,-3.1883,Edinburgh GB,gb,186525"
-"frankfurt,""Frankfurt, Germany"",50.1109,8.6821,Frankfurt DE,de,187337"
-"geneva,""Geneva, Switzerland"",46.2044,6.1432,Geneva CH,ch,188057"
-"gothenburg,""Gothenburg, Sweden"",57.7089,11.9746,Gothenburg SE,se,189894"
-"hamburg,""Hamburg, Germany"",53.5511,9.9937,Hamburg DE,de,187331"
-"helsinki,""Helsinki, Finland"",60.1699,24.9384,Helsinki FI,fi,189934"
-"ibiza,""Ibiza, Spain"",38.9067,1.4206,Ibiza ES,es,187460"
-"istanbul,""Istanbul, Turkey"",41.0082,28.9784,Istanbul TR,tr,293974"
-"izmir,""Izmir, Turkey"",38.4237,27.1428,Izmir TR,tr,298006"
-"kyiv,""Kyiv, Ukraine"",50.4501,30.5234,Kyiv UA,ua,294470"
-"lagos,""Lagos, Portugal"",37.1028,-8.673,Lagos PT,pt,189117"
-"lisbon,""Lisbon, Portugal"",38.7223,-9.1393,Lisbon PT,pt,186753"
-"london,""London, UK"",51.5074,-0.1278,London GB,gb,186338"
-"ljubljana,""Ljubljana, Slovenia"",46.0569,14.5058,Ljubljana SI,si,274873"
-"madrid,""Madrid, Spain"",40.4168,-3.7038,Madrid ES,es,187514"
-"malaga,""Malaga, Spain"",36.7213,-4.4214,Malaga ES,es,187438"
-"manchester,""Manchester, UK"",53.4808,-2.2426,Manchester GB,gb,186400"
-"marseille,""Marseille, France"",43.2965,5.3698,Marseille FR,fr,187253"
-"milan,""Milan, Italy"",45.4642,9.19,Milan IT,it,187849"
-"moscow,""Moscow, Russia"",55.7558,37.6173,Moscow RU,ru,298484"
-"munich,""Munich, Germany"",48.1351,11.582,Munich DE,de,187309"
-"naples,""Naples, Italy"",40.8518,14.2681,Naples IT,it,187785"
-"nice,""Nice, France"",43.7102,7.262,Nice FR,fr,187234"
-"oslo,""Oslo, Norway"",59.9139,10.7522,Oslo NO,no,189934"
-"palmademallorca,""Palma de Mallorca, Spain"",39.5696,2.6502,Palma de Mallorca ES,es,187463"
-"paris,""Paris, France"",48.8566,2.3522,Paris FR,fr,187147"
-"porto,""Porto, Portugal"",41.1579,-8.6291,Porto PT,pt,186815"
-"prague,""Prague, Czech Republic"",50.0755,14.4378,Prague CZ,cz,274707"
-"reykjavik,""Reykjavik, Iceland"",64.1466,-21.9426,Reykjavik IS,is,189970"
-"riga,""Riga, Latvia"",56.9496,24.1052,Riga LV,lv,274966"
-"rome,""Rome, Italy"",41.9028,12.4964,Rome IT,it,187791"
-"saintpetersburg,""Saint Petersburg, Russia"",59.9343,30.3351,Saint Petersburg RU,ru,298507"
-"salzburg,""Salzburg, Austria"",47.8095,13.055,Salzburg AT,at,188082"
-"sarajevo,""Sarajevo, Bosnia and Herzegovina"",43.8563,18.4131,Sarajevo BA,ba,294450"
-"sofia,""Sofia, Bulgaria"",42.6977,23.3219,Sofia BG,bg,294452"
-"split,""Split, Croatia"",43.5081,16.4402,Split HR,hr,295370"
-"stockholm,""Stockholm, Sweden"",59.3293,18.0686,Stockholm SE,se,189852"
-"tallinn,""Tallinn, Estonia"",59.437,24.7536,Tallinn EE,ee,274958"
-"tenerife,""Tenerife, Spain"",28.2916,-16.6291,Tenerife ES,es,187479"
-"thessaloniki,""Thessaloniki, Greece"",40.6401,22.9444,Thessaloniki GR,gr,189473"
-"tirana,""Tirana, Albania"",41.3275,19.8187,Tirana AL,al,318867"
-"trondheim,""Trondheim, Norway"",63.4305,10.3951,Trondheim NO,no,189944"
-"valencia,""Valencia, Spain"",39.4699,-0.3763,Valencia ES,es,187529"
-"venice,""Venice, Italy"",45.4408,12.3155,Venice IT,it,187870"
-"vienna,""Vienna, Austria"",48.2082,16.3738,Vienna AT,at,190454"
-"vilnius,""Vilnius, Lithuania"",54.6872,25.2797,Vilnius LT,lt,274951"
-"warsaw,""Warsaw, Poland"",52.2297,21.0122,Warsaw PL,pl,274856"
-"zagreb,""Zagreb, Croatia"",45.815,15.9819,Zagreb HR,hr,294454"
-"zurich,""Zurich, Switzerland"",47.3769,8.5417,Zurich CH,ch,188113"
+key,name,lat,lon,search_query,country,tripadvisor_id
+alicante,Alicante,38.3452,-0.4815,Alicante ES,es,187525
+amsterdam,Amsterdam,52.377956,4.89707,Amsterdam NL,nl,188590
+ankara,Ankara,39.925533,32.866287,Ankara TR,tr,293974
+antalya,Antalya,36.8969,30.7133,Antalya TR,tr,297962
+athens,Athens,37.9838,23.7275,Athens GR,gr,189398
+barcelona,Barcelona,41.3851,2.1734,Barcelona ES,es,187497
+belgrade,Belgrade,44.7866,20.4489,Belgrade RS,rs,304105
+bern,Bern,46.948,7.4474,Bern CH,ch,188052
+berlin,Berlin,52.52,13.405,Berlin DE,de,187323
+bergamo,Bergamo,45.695,9.67,Bergamo IT,it,187830
+birmingham,Birmingham,52.4862,-1.8904,Birmingham GB,gb,186400
+bologna,Bologna,44.4949,11.3426,Bologna IT,it,187801
+brussels,Brussels,50.8503,4.3517,Brussels BE,be,188644
+bucharest,Bucharest,44.4268,26.1025,Bucharest RO,ro,274881
+budapest,Budapest,47.4979,19.0402,Budapest HU,hu,274887
+catania,Catania,37.5079,15.083,Catania IT,it,187888
+cologne,Cologne,50.9375,6.9603,Cologne DE,de,187371
+copenhagen,Copenhagen,55.6761,12.5683,Copenhagen DK,dk,189541
+corfu,Corfu,39.6243,19.9217,Corfu GR,gr,189458
+dublin,Dublin,53.3498,-6.2603,Dublin IE,ie,186591
+dubrovnik,Dubrovnik,42.6507,18.0944,Dubrovnik HR,hr,304023
+dusseldorf,Düsseldorf,51.2277,6.7735,Düsseldorf DE,de,187340
+edinburgh,Edinburgh,55.9533,-3.1883,Edinburgh GB,gb,186525
+frankfurt,Frankfurt,50.1109,8.6821,Frankfurt DE,de,187337
+geneva,Geneva,46.2044,6.1432,Geneva CH,ch,188057
+gothenburg,Gothenburg,57.7089,11.9746,Gothenburg SE,se,189894
+hamburg,Hamburg,53.5511,9.9937,Hamburg DE,de,187331
+helsinki,Helsinki,60.1699,24.9384,Helsinki FI,fi,189934
+ibiza,Ibiza,38.9067,1.4206,Ibiza ES,es,187460
+istanbul,Istanbul,41.0082,28.9784,Istanbul TR,tr,293974
+izmir,Izmir,38.4237,27.1428,Izmir TR,tr,298006
+kyiv,Kyiv,50.4501,30.5234,Kyiv UA,ua,294470
+lagos,Lagos,37.1028,-8.673,Lagos PT,pt,189117
+lisbon,Lisbon,38.7223,-9.1393,Lisbon PT,pt,186753
+london,London,51.5074,-0.1278,London GB,gb,186338
+ljubljana,Ljubljana,46.0569,14.5058,Ljubljana SI,si,274873
+madrid,Madrid,40.4168,-3.7038,Madrid ES,es,187514
+malaga,Malaga,36.7213,-4.4214,Malaga ES,es,187438
+manchester,Manchester,53.4808,-2.2426,Manchester GB,gb,186400
+marseille,Marseille,43.2965,5.3698,Marseille FR,fr,187253
+milan,Milan,45.4642,9.19,Milan IT,it,187849
+moscow,Moscow,55.7558,37.6173,Moscow RU,ru,298484
+munich,Munich,48.1351,11.582,Munich DE,de,187309
+naples,Naples,40.8518,14.2681,Naples IT,it,187785
+nice,Nice,43.7102,7.262,Nice FR,fr,187234
+oslo,Oslo,59.9139,10.7522,Oslo NO,no,189934
+palmademallorca,Palma de Mallorca,39.5696,2.6502,Palma de Mallorca ES,es,187463
+paris,Paris,48.8566,2.3522,Paris FR,fr,187147
+porto,Porto,41.1579,-8.6291,Porto PT,pt,186815
+prague,Prague,50.0755,14.4378,Prague CZ,cz,274707
+reykjavik,Reykjavik,64.1466,-21.9426,Reykjavik IS,is,189970
+riga,Riga,56.9496,24.1052,Riga LV,lv,274966
+rome,Rome,41.9028,12.4964,Rome IT,it,187791
+saintpetersburg,Saint Petersburg,59.9343,30.3351,Saint Petersburg RU,ru,298507
+salzburg,Salzburg,47.8095,13.055,Salzburg AT,at,188082
+sarajevo,Sarajevo,43.8563,18.4131,Sarajevo BA,ba,294450
+sofia,Sofia,42.6977,23.3219,Sofia BG,bg,294452
+split,Split,43.5081,16.4402,Split HR,hr,295370
+stockholm,Stockholm,59.3293,18.0686,Stockholm SE,se,189852
+tallinn,Tallinn,59.437,24.7536,Tallinn EE,ee,274958
+tenerife,Tenerife,28.2916,-16.6291,Tenerife ES,es,187479
+thessaloniki,Thessaloniki,40.6401,22.9444,Thessaloniki GR,gr,189473
+tirana,Tirana,41.3275,19.8187,Tirana AL,al,318867
+trondheim,Trondheim,63.4305,10.3951,Trondheim NO,no,189944
+valencia,Valencia,39.4699,-0.3763,Valencia ES,es,187529
+venice,Venice,45.4408,12.3155,Venice IT,it,187870
+vienna,Vienna,48.2082,16.3738,Vienna AT,at,190454
+vilnius,Vilnius,54.6872,25.2797,Vilnius LT,lt,274951
+warsaw,Warsaw,52.2297,21.0122,Warsaw PL,pl,274856
+zagreb,Zagreb,45.815,15.9819,Zagreb HR,hr,294454
+zurich,Zurich,47.3769,8.5417,Zurich CH,ch,188113
