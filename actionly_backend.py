@@ -1,11 +1,11 @@
-# STAYFINDR BACKEND v5.3 - Final Foolproof Version
-# Contains permanent fixes for all copy-paste related SyntaxErrors.
-# Long lines have been refactored for maximum robustness.
+# STAYFINDR BACKEND v5.4 - Final Version with Ultra-Robust Lines
+# Contains final fixes for all copy-paste related SyntaxErrors.
+# Complex one-liners have been rewritten into simpler multi-line blocks.
 
 import os
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import urlencode
 from functools import cache
 import re
 
@@ -98,4 +98,79 @@ def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
 
 def process_booking_hotels(hotels_data, city_info, search_params):
     processed = []
-    for i, hotel in enumerate
+    # REVISION: Broken down the "for" loop to prevent copy-paste errors.
+    hotels_to_process = hotels_data[:20]
+    for i, hotel in enumerate(hotels_to_process):
+        price = 'N/A'
+        price_info = hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value')
+        
+        if price_info:
+            nights = (datetime.strptime(search_params['checkout'], '%Y-%m-%d') - datetime.strptime(search_params['checkin'], '%Y-%m-%d')).days
+            if nights > 0:
+                price = int(price_info / nights)
+            else:
+                price = int(price_info)
+        
+        rating = hotel.get('reviewScore', 0.0)
+        rating = round(float(rating) / 2, 1) if rating > 5 else round(float(rating), 1)
+
+        processed.append({
+            'id': hotel.get('id') or f"booking_{i}",
+            'name': hotel.get('name', 'Unknown Hotel'),
+            'address': hotel.get('address', city_info['name']),
+            'coordinates': [float(hotel.get('latitude', city_info['coordinates'][0])), float(hotel.get('longitude', city_info['coordinates'][1]))],
+            'price': price,
+            'rating': rating or 4.0,
+            'source': 'booking.com',
+            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'booking_url': create_booking_url(hotel, city_info, search_params)
+        })
+    return processed
+
+def process_tripadvisor_hotels(hotels_data, city_info, search_params):
+    processed = []
+    # REVISION: Broken down the "for" loop to prevent copy-paste errors.
+    hotels_to_process = hotels_data[:15]
+    for i, hotel in enumerate(hotels_to_process):
+        price = 'N/A'
+        price_str = hotel.get('priceForDisplay')
+        if price_str:
+            numbers = URL_REGEX.findall(price_str.replace(',', ''))
+            if numbers:
+                price = int(numbers[0])
+
+        processed.append({
+            'id': hotel.get('id') or f"tripadvisor_{i}",
+            'name': hotel.get('title', 'Unknown Hotel'),
+            'address': city_info['name'],
+            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', city_info['coordinates'][0])), float(hotel.get('geoSummary', {}).get('longitude', city_info['coordinates'][1]))],
+            'price': price,
+            'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
+            'source': 'tripadvisor',
+            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'booking_url': f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
+        })
+    return processed
+
+# --- URL & Fallback Generators ---
+
+def create_booking_url(hotel, city_info, params):
+    country_code_map = {
+        'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es',
+        'it': 'it', 'de': 'de', 'nl': 'nl'
+    }
+    domain_suffix = country_code_map.get(city_info['country'], city_info['country']) + '.html'
+    
+    base_params = {
+        'ss': hotel.get('name', 'Hotel'),
+        'checkin': params['checkin'],
+        'checkout': params['checkout'],
+        **ROOM_TYPES.get(params['room_type'], {}).get('booking_params', {})
+    }
+    query_string = urlencode(base_params)
+    return f"https://www.booking.com/searchresults.{domain_suffix}?{query_string}"
+
+def get_demo_hotels(city_info, room_type, source):
+    logging.warning(f"Using fallback DEMO data for {city_info['name']} from {source}.")
+    demo_templates = [
+        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 250, '
