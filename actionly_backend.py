@@ -1,5 +1,5 @@
-# STAYFINDR BACKEND v6.2 - Robust CSV Loading
-# Handles potential missing coordinate data in cities.csv gracefully.
+# STAYFINDR BACKEND v6.3 - Intelligent CSV Loading
+# Uses CSV Sniffer to automatically detect delimiters (comma vs. semicolon).
 
 import os
 import logging
@@ -50,23 +50,32 @@ ROOM_TYPES = {
 # Function to load cities from the CSV file
 def load_cities_from_csv(filename='cities.csv'):
     """
-    Loads city data from a CSV file and formats it into the required dictionary structure.
+    Loads city data from a CSV file, automatically detecting the delimiter.
     """
     cities = {}
     try:
-        # Use utf-8-sig to handle potential BOM (Byte Order Mark) from Excel
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
-            reader = csv.DictReader(infile, delimiter=';')
+            # REVISION: Use Sniffer to automatically detect CSV format (comma vs semicolon).
+            try:
+                dialect = csv.Sniffer().sniff(infile.read(1024))
+                infile.seek(0) # Reset file pointer after sniffing
+                reader = csv.DictReader(infile, dialect=dialect)
+            except csv.Error:
+                logging.warning("CSV Sniffer failed, falling back to comma delimiter.")
+                infile.seek(0)
+                reader = csv.DictReader(infile) # Default to comma if sniffing fails
+
             for i, row in enumerate(reader):
+                if not any(row.values()): # Skip completely empty rows
+                    continue
+                
                 key = row.get('key')
                 if not key:
                     logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
                     continue
 
-                # Added robust error handling for float conversion.
                 lat, lon = 0.0, 0.0 # Default coordinates
                 try:
-                    # Replace comma decimal separator with a period for float conversion
                     lat_str = row.get('lat', '0').replace(',', '.')
                     lon_str = row.get('lon', '0').replace(',', '.')
                     lat = float(lat_str)
@@ -290,7 +299,7 @@ def handle_hotel_search(source):
 # --- Flask Routes ---
 @app.route('/')
 def home():
-    return render_template_string('<h1>STAYFINDR Backend v6.2</h1><p>City data is now loaded from cities.csv</p>')
+    return render_template_string('<h1>STAYFINDR Backend v6.3</h1><p>City data is now loaded from cities.csv</p>')
 
 @app.route('/api/cities')
 def get_cities_route():
@@ -314,11 +323,11 @@ def get_hotels_legacy_route():
 
 @app.route('/test')
 def test_endpoint_route():
-    return jsonify({'status': 'STAYFINDR Backend v6.2 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
+    return jsonify({'status': 'STAYFINDR Backend v6.3 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v6.2...")
+    logging.info("🚀 Starting STAYFINDR Backend v6.3...")
     logging.info("▶️ Now loading city data from cities.csv.")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
