@@ -924,9 +924,9 @@ def test_stockholm():
         checkin = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
         checkout = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
         search_params = {
-            'city': 'stockholm', 'checkin': checkin, 'checkout': checkout,
-            'adults': '2', 'rooms': '1', 'room_type': 'junior_suite', 'source': 'booking'
-        }
+    'city_key': 'stockholm', 'checkin': checkin, 'checkout': checkout,
+    'adults': '2', 'rooms': '1', 'room_type': 'junior_suite', 'source': 'booking'
+    }
         
         result = api_manager.search_hotels_multi_source(**search_params)
         
@@ -946,9 +946,9 @@ def test_stockholm_tripadvisor():
         checkin = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
         checkout = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
         search_params = {
-            'city': 'stockholm', 'checkin': checkin, 'checkout': checkout,
-            'adults': '2', 'rooms': '1', 'room_type': 'junior_suite', 'source': 'tripadvisor'
-        }
+    'city_key': 'stockholm', 'checkin': checkin, 'checkout': checkout,
+    'adults': '2', 'rooms': '1', 'room_type': 'junior_suite', 'source': 'tripadvisor'
+      }
         
         result = api_manager.search_hotels_multi_source(**search_params)
         
