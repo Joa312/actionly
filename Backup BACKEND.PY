@@ -1,926 +1,334 @@
-# STAYFINDR BACKEND - Professional Production-Ready Architecture
-# Multi-platform integration with robust error handling and caching
-# Combines proven APIs with modern Python patterns + Demo Data Fallback
+# STAYFINDR BACKEND v6.3 - Intelligent CSV Loading
+# Uses CSV Sniffer to automatically detect delimiters (comma vs. semicolon).
 
 import os
-import json
-import time
+import logging
 from datetime import datetime, timedelta
-from urllib.parse import quote_plus, urlencode
-import hashlib
-import random
+from urllib.parse import urlencode, quote_plus
+from functools import cache
+import re
+import csv
 
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import requests
-from functools import lru_cache
+from requests.exceptions import RequestException
 
+# --- Initial Configuration ---
 app = Flask(__name__)
-CORS(app)
 
-# =============================================================================
-# CONFIGURATION & CONSTANTS
-# =============================================================================
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# API Configuration - Multiple sources for reliability
-RAPIDAPI_KEY = os.environ.get('RAPIDAPI_KEY', 'e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999')
-RAPIDAPI_HOST_BOOKING = "booking-com18.p.rapidapi.com"
-RAPIDAPI_HOST_HOTELS = "hotels-com-provider.p.rapidapi.com"
+RAPIDAPI_KEY = os.environ.get('RAPIDAPI_KEY')
+if not RAPIDAPI_KEY:
+    raise ValueError("FATAL: RAPIDAPI_KEY environment variable is not set.")
 
-# European Cities Configuration - 29 major destinations
-CITIES = {
-    'stockholm': {
-        'name': 'Stockholm, Sweden',
-        'coordinates': [59.3293, 18.0686],
-        'search_query': 'Stockholm Sweden',
-        'country': 'se'
-    },
-    'paris': {
-        'name': 'Paris, France',
-        'coordinates': [48.8566, 2.3522],
-        'search_query': 'Paris France',
-        'country': 'fr'
-    },
-    'london': {
-        'name': 'London, UK',
-        'coordinates': [51.5074, -0.1278],
-        'search_query': 'London United Kingdom',
-        'country': 'gb'
-    },
-    'amsterdam': {
-        'name': 'Amsterdam, Netherlands',
-        'coordinates': [52.3676, 4.9041],
-        'search_query': 'Amsterdam Netherlands',
-        'country': 'nl'
-    },
-    'barcelona': {
-        'name': 'Barcelona, Spain',
-        'coordinates': [41.3851, 2.1734],
-        'search_query': 'Barcelona Spain',
-        'country': 'es'
-    },
-    'rome': {
-        'name': 'Rome, Italy',
-        'coordinates': [41.9028, 12.4964],
-        'search_query': 'Rome Italy',
-        'country': 'it'
-    },
-    'berlin': {
-        'name': 'Berlin, Germany',
-        'coordinates': [52.5200, 13.4050],
-        'search_query': 'Berlin Germany',
-        'country': 'de'
-    },
-    'copenhagen': {
-        'name': 'Copenhagen, Denmark',
-        'coordinates': [55.6761, 12.5683],
-        'search_query': 'Copenhagen Denmark',
-        'country': 'dk'
-    },
-    'vienna': {
-        'name': 'Vienna, Austria',
-        'coordinates': [48.2082, 16.3738],
-        'search_query': 'Vienna Austria',
-        'country': 'at'
-    },
-    'prague': {
-        'name': 'Prague, Czech Republic',
-        'coordinates': [50.0755, 14.4378],
-        'search_query': 'Prague Czech Republic',
-        'country': 'cz'
-    },
-    'madrid': {
-        'name': 'Madrid, Spain',
-        'coordinates': [40.4168, -3.7038],
-        'search_query': 'Madrid Spain',
-        'country': 'es'
-    },
-    'milano': {
-        'name': 'Milano, Italy',
-        'coordinates': [45.4642, 9.1900],
-        'search_query': 'Milano Italy',
-        'country': 'it'
-    },
-    'zurich': {
-        'name': 'Zürich, Switzerland',
-        'coordinates': [47.3769, 8.5417],
-        'search_query': 'Zürich Switzerland',
-        'country': 'ch'
-    },
-    'oslo': {
-        'name': 'Oslo, Norway',
-        'coordinates': [59.9139, 10.7522],
-        'search_query': 'Oslo Norway',
-        'country': 'no'
-    },
-    'helsinki': {
-        'name': 'Helsinki, Finland',
-        'coordinates': [60.1695, 24.9354],
-        'search_query': 'Helsinki Finland',
-        'country': 'fi'
-    },
-    'warsaw': {
-        'name': 'Warsaw, Poland',
-        'coordinates': [52.2297, 21.0122],
-        'search_query': 'Warsaw Poland',
-        'country': 'pl'
-    },
-    'budapest': {
-        'name': 'Budapest, Hungary',
-        'coordinates': [47.4979, 19.0402],
-        'search_query': 'Budapest Hungary',
-        'country': 'hu'
-    },
-    'dublin': {
-        'name': 'Dublin, Ireland',
-        'coordinates': [53.3498, -6.2603],
-        'search_query': 'Dublin Ireland',
-        'country': 'ie'
-    },
-    'lisbon': {
-        'name': 'Lisbon, Portugal',
-        'coordinates': [38.7223, -9.1393],
-        'search_query': 'Lisbon Portugal',
-        'country': 'pt'
-    },
-    'brussels': {
-        'name': 'Brussels, Belgium',
-        'coordinates': [50.8503, 4.3517],
-        'search_query': 'Brussels Belgium',
-        'country': 'be'
-    },
-    'athens': {
-        'name': 'Athens, Greece',
-        'coordinates': [37.9838, 23.7275],
-        'search_query': 'Athens Greece',
-        'country': 'gr'
-    },
-    'munich': {
-        'name': 'Munich, Germany',
-        'coordinates': [48.1351, 11.5820],
-        'search_query': 'Munich Germany',
-        'country': 'de'
-    },
-    'lyon': {
-        'name': 'Lyon, France',
-        'coordinates': [45.7640, 4.8357],
-        'search_query': 'Lyon France',
-        'country': 'fr'
-    },
-    'florence': {
-        'name': 'Florence, Italy',
-        'coordinates': [43.7696, 11.2558],
-        'search_query': 'Florence Italy',
-        'country': 'it'
-    },
-    'edinburgh': {
-        'name': 'Edinburgh, Scotland',
-        'coordinates': [55.9533, -3.1883],
-        'search_query': 'Edinburgh Scotland',
-        'country': 'gb'
-    },
-    'nice': {
-        'name': 'Nice, France',
-        'coordinates': [43.7102, 7.2620],
-        'search_query': 'Nice France',
-        'country': 'fr'
-    },
-    'palma': {
-        'name': 'Palma, Spain',
-        'coordinates': [39.5696, 2.6502],
-        'search_query': 'Palma Spain',
-        'country': 'es'
-    },
-    'santorini': {
-        'name': 'Santorini, Greece',
-        'coordinates': [36.3932, 25.4615],
-        'search_query': 'Santorini Greece',
-        'country': 'gr'
-    },
-    'ibiza': {
-        'name': 'Ibiza, Spain',
-        'coordinates': [38.9067, 1.4206],
-        'search_query': 'Ibiza Spain',
-        'country': 'es'
-    }
-}
+CORS(app, origins=[
+    "https://joa312.github.io",
+    "http://127.0.0.1:5500",
+    "http://localhost:3000",
+    "http://127.0.0.1:5000"
+])
 
-# Room Type Configuration with Junior Suite
+# --- API & Data Constants ---
+BOOKING_API_HOST = "booking-com18.p.rapidapi.com"
+TRIPADVISOR_API_HOST = "tripadvisor16.p.rapidapi.com"
+
+BOOKING_HOTEL_LIMIT = 20
+TRIPADVISOR_HOTEL_LIMIT = 15
+
+URL_REGEX = re.compile(r'\d+')
+
 ROOM_TYPES = {
-    'single': {
-        'name': 'Single Room',
-        'description': 'Comfortable single accommodation',
-        'guests': 1,
-        'keywords': ['single', 'solo', 'individual', 'one bed']
-    },
-    'double': {
-        'name': 'Double Room',
-        'description': 'Perfect for couples and business travelers',
-        'guests': 2,
-        'keywords': ['double', 'twin', 'couple', 'standard']
-    },
-    'family': {
-        'name': 'Family Room',
-        'description': 'Spacious accommodation for families',
-        'guests': 4,
-        'children': 2,
-        'keywords': ['family', 'quadruple', 'connecting', 'bunk bed']
-    },
-    'junior_suite': {
-        'name': 'Junior Suite',
-        'description': 'Spacious room with sitting area - upgraded comfort',
-        'guests': 2,
-        'keywords': ['junior suite', 'junior', 'suite', 'sitting area', 'upgraded', 'deluxe']
-    },
-    'suite': {
-        'name': 'Suite/Apartment',
-        'description': 'Luxury accommodation with separate living area',
-        'guests': 3,
-        'keywords': ['suite', 'apartment', 'penthouse', 'executive', 'luxury']
-    }
+    'single': {'name': 'Single Room', 'description': 'Perfect for solo travelers', 'guests': 1, 'booking_params': {'group_adults': 1, 'no_rooms': 1}},
+    'double': {'name': 'Double Room', 'description': 'Ideal for couples', 'guests': 2, 'booking_params': {'group_adults': 2, 'no_rooms': 1}},
+    'family': {'name': 'Family Room', 'description': 'Great for families', 'guests': 4, 'booking_params': {'group_adults': 2, 'no_rooms': 1, 'group_children': 2}},
+    'junior_suite': {'name': 'Junior Suite', 'description': 'Spacious room with sitting area', 'guests': 2, 'booking_params': {'group_adults': 2, 'no_rooms': 1}},
+    'suite': {'name': 'Suite/Apartment', 'description': 'Luxury accommodation', 'guests': 3, 'booking_params': {'group_adults': 3, 'no_rooms': 1}}
 }
 
-# Country-specific Booking.com domains
-BOOKING_DOMAINS = {
-    'se': 'sv.html', 'no': 'no.html', 'fi': 'fi.html', 'dk': 'da.html',
-    'fr': 'fr.html', 'gb': 'en-gb.html', 'nl': 'nl.html', 'be': 'nl.html',
-    'es': 'es.html', 'it': 'it.html', 'de': 'de.html', 'at': 'de.html',
-    'ch': 'de.html', 'cz': 'cs.html', 'pl': 'pl.html', 'hu': 'hu.html',
-    'ie': 'en-gb.html', 'pt': 'pt.html', 'gr': 'el.html'
-}
+# Function to load cities from the CSV file
+def load_cities_from_csv(filename='cities.csv'):
+    """
+    Loads city data from a CSV file, automatically detecting the delimiter.
+    """
+    cities = {}
+    try:
+        with open(filename, mode='r', encoding='utf-8-sig') as infile:
+            # REVISION: Use Sniffer to automatically detect CSV format (comma vs semicolon).
+            try:
+                dialect = csv.Sniffer().sniff(infile.read(1024))
+                infile.seek(0) # Reset file pointer after sniffing
+                reader = csv.DictReader(infile, dialect=dialect)
+            except csv.Error:
+                logging.warning("CSV Sniffer failed, falling back to comma delimiter.")
+                infile.seek(0)
+                reader = csv.DictReader(infile) # Default to comma if sniffing fails
 
-# =============================================================================
-# CORE API INTEGRATION LAYER
-# =============================================================================
+            for i, row in enumerate(reader):
+                if not any(row.values()): # Skip completely empty rows
+                    continue
+                
+                key = row.get('key')
+                if not key:
+                    logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
+                    continue
 
-class APIManager:
-    """Manages multiple API sources with fallback and caching"""
-    
-    def __init__(self):
-        self.cache = {}
-        self.cache_ttl = 900  # 15 minutes
-    
-    def _get_cache_key(self, method, **kwargs):
-        """Generate cache key from method and parameters"""
-        key_parts = [method] + [f"{k}:{v}" for k, v in sorted(kwargs.items())]
-        return hashlib.md5("|".join(key_parts).encode()).hexdigest()
-    
-    def _is_cache_valid(self, cache_entry):
-        """Check if cache entry is still valid"""
-        return time.time() - cache_entry['timestamp'] < self.cache_ttl
-    
-    def _get_from_cache(self, cache_key):
-        """Retrieve from cache if valid"""
-        if cache_key in self.cache and self._is_cache_valid(self.cache[cache_key]):
-            return self.cache[cache_key]['data']
-        return None
-    
-    def _set_cache(self, cache_key, data):
-        """Store in cache with timestamp"""
-        self.cache[cache_key] = {
-            'data': data,
-            'timestamp': time.time()
-        }
-    
-    def search_hotels_multi_source(self, city_key, checkin, checkout, adults, rooms, room_type='double'):
-        """Search hotels using multiple APIs with intelligent fallback"""
-        cache_key = self._get_cache_key('search', city=city_key, checkin=checkin, 
-                                       checkout=checkout, adults=adults, rooms=rooms, room_type=room_type)
-        
-        # Check cache first
-        cached_result = self._get_from_cache(cache_key)
-        if cached_result:
-            return cached_result
-        
-        # Try primary source (Booking.com)
-        try:
-            result = self._search_booking_api(city_key, checkin, checkout, adults, rooms, room_type)
-            if result and result.get('hotels'):
-                self._set_cache(cache_key, result)
-                return result
-        except Exception as e:
-            print(f"Booking API failed: {e}")
-        
-        # Try secondary source (Hotels.com)
-        try:
-            result = self._search_hotels_api(city_key, checkin, checkout, adults, rooms, room_type)
-            if result and result.get('hotels'):
-                self._set_cache(cache_key, result)
-                return result
-        except Exception as e:
-            print(f"Hotels API failed: {e}")
-        
-        # Fallback to demo data
-        result = self._generate_demo_data(city_key, room_type)
-        self._set_cache(cache_key, result)
-        return result
-    
-    def _search_booking_api(self, city_key, checkin, checkout, adults, rooms, room_type):
-        """Search using Booking.com API"""
-        city_info = CITIES[city_key]
-        location_id = self._get_booking_location_id(city_info['search_query'])
-        
-        if not location_id:
-            raise Exception("Could not get location ID")
-        
-        url = "https://booking-com18.p.rapidapi.com/stays/search"
-        querystring = {
-            "locationId": location_id,
-            "checkinDate": checkin,
-            "checkoutDate": checkout,
-            "adults": adults,
-            "rooms": rooms,
-            "currency": "EUR"
-        }
-        
-        headers = {
-            "x-rapidapi-key": RAPIDAPI_KEY,
-            "x-rapidapi-host": RAPIDAPI_HOST_BOOKING
-        }
-        
-        response = requests.get(url, headers=headers, params=querystring, timeout=10)
+                lat, lon = 0.0, 0.0 # Default coordinates
+                try:
+                    lat_str = row.get('lat', '0').replace(',', '.')
+                    lon_str = row.get('lon', '0').replace(',', '.')
+                    lat = float(lat_str)
+                    lon = float(lon_str)
+                except (ValueError, TypeError):
+                    logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}. Using default (0,0).")
+
+                cities[key] = {
+                    'name': row.get('name', 'N/A'),
+                    'coordinates': [lat, lon],
+                    'search_query': row.get('search_query', ''),
+                    'country': row.get('country', ''),
+                    'tripadvisor_id': row.get('tripadvisor_id', '')
+                }
+        logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
+        return cities
+    except FileNotFoundError:
+        logging.error(f"CRITICAL: The file {filename} was not found. The application cannot start without it.")
+        raise
+    except Exception as e:
+        logging.error(f"CRITICAL: Failed to read or parse {filename}. Error: {e}", exc_info=True)
+        raise
+
+# The CITIES dictionary is now loaded from the CSV file at startup.
+CITIES = load_cities_from_csv('cities.csv')
+
+# --- External API Functions with Caching ---
+
+@cache
+def get_booking_location_id(city_query):
+    if not city_query: return None
+    url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
+    try:
+        response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params={"query": city_query}, timeout=10)
         response.raise_for_status()
-        
-        data = response.json()
-        if not data.get('data'):
-            raise Exception("No hotels returned")
-        
-        processed_hotels = self._process_booking_hotels(data['data'][:50], city_info, 
-                                                       checkin, checkout, adults, rooms, room_type)
-        
-        return {
-            'source': 'booking.com',
-            'city': city_info['name'],
-            'hotels': processed_hotels,
-            'total_found': len(processed_hotels)
-        }
-    
-    def _search_hotels_api(self, city_key, checkin, checkout, adults, rooms, room_type):
-        """Search using Hotels.com API (fallback)"""
-        # Implementation for Hotels.com API
-        # This would be similar structure but with different endpoint
-        raise Exception("Hotels.com API not implemented yet")
-    
-    def _get_booking_location_id(self, city_query):
-        """Get Booking.com location ID for city"""
-        url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
-        querystring = {"query": city_query, "languageCode": "en"}
-        headers = {
-            "x-rapidapi-key": RAPIDAPI_KEY,
-            "x-rapidapi-host": RAPIDAPI_HOST_BOOKING
-        }
-        
-        response = requests.get(url, headers=headers, params=querystring, timeout=5)
-        response.raise_for_status()
-        
         data = response.json()
         if data.get('data'):
             return data['data'][0].get('id')
-        return None
-    
-    def _process_booking_hotels(self, hotels_data, city_info, checkin, checkout, adults, rooms, room_type):
-        """Process hotel data from Booking.com API"""
-        processed_hotels = []
-        
-        for i, hotel in enumerate(hotels_data):
-            # Extract basic info
-            hotel_name = hotel.get('name', 'Unknown Hotel')
-            hotel_id = hotel.get('id') or f"hotel_{i}"
-            
-            # Get coordinates
-            latitude = hotel.get('latitude')
-            longitude = hotel.get('longitude')
-            
-            if latitude and longitude:
-                coordinates = [float(latitude), float(longitude)]
-            else:
-                # Fallback: spread around city center
-                base_lat, base_lng = city_info['coordinates']
-                coordinates = [
-                    base_lat + (i * 0.01) - 0.05,
-                    base_lng + (i * 0.01) - 0.05
-                ]
-            
-            # Extract price
-            price = self._extract_price(hotel, checkin, checkout)
-            
-            # Extract rating
-            rating = self._extract_rating(hotel)
-            
-            # Generate room type-specific description
-            room_description = self._get_room_description(hotel_name, room_type)
-            
-            # Create booking URL
-            booking_url = self._create_enhanced_booking_url(
-                hotel, city_info, checkin, checkout, adults, rooms, room_type
-            )
-            
-            processed_hotel = {
-                'id': hotel_id,
-                'name': hotel_name,
-                'address': hotel.get('address', city_info['name']),
-                'coordinates': coordinates,
-                'price': price,
-                'rating': rating,
-                'room_type': ROOM_TYPES[room_type]['name'],
-                'room_description': room_description,
-                'booking_url': booking_url,
-                'source': 'booking.com'
-            }
-            
-            processed_hotels.append(processed_hotel)
-        
-        return processed_hotels
-    
-    def _extract_price(self, hotel, checkin, checkout):
-        """Extract and normalize price from hotel data"""
+    except RequestException as e:
+        logging.error(f"Booking.com location ID request failed: {e}")
+    return None
+
+@cache
+def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
+    url = f"https://{BOOKING_API_HOST}/stays/search"
+    params = {"locationId": location_id, "checkinDate": checkin, "checkoutDate": checkout, "adults": adults, "rooms": rooms, "currency": "EUR"}
+    try:
+        response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except RequestException as e:
+        logging.error(f"Booking.com search request failed: {e}")
+    return None
+
+@cache
+def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
+    if not geo_id: return None
+    url = f"https://{TRIPADVISOR_API_HOST}/api/v1/hotels/searchHotels"
+    params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
+    try:
+        response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('data', {}).get('data', [])
+    except RequestException as e:
+        logging.error(f"TripAdvisor search request failed: {e}")
+    return []
+
+# --- Data Processing Functions ---
+
+def process_booking_hotels(hotels_data, city_info, search_params):
+    processed = []
+    hotels_to_process = hotels_data[:BOOKING_HOTEL_LIMIT]
+    for i, hotel in enumerate(hotels_to_process):
         price = 'N/A'
+        price_info = hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value')
         
-        if 'priceBreakdown' in hotel:
-            price_info = hotel['priceBreakdown'].get('grossPrice', {})
-            if 'value' in price_info:
-                total_price = price_info['value']
-                try:
-                    # Calculate per night
-                    checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
-                    checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
-                    nights = (checkout_date - checkin_date).days
-                    if nights > 0:
-                        price = int(total_price / nights)
-                    else:
-                        price = total_price
-                except:
-                    price = int(total_price / 7)  # Fallback: assume 7 nights
-        elif 'price' in hotel:
-            price = hotel['price']
+        if price_info:
+            nights = (datetime.strptime(search_params['checkout'], '%Y-%m-%d') - datetime.strptime(search_params['checkin'], '%Y-%m-%d')).days
+            if nights > 0:
+                price = int(price_info / nights)
+            else:
+                price = int(price_info)
         
-        return price
+        rating = hotel.get('reviewScore', 0.0)
+        rating = round(float(rating) / 2, 1) if rating > 5 else round(float(rating), 1)
+
+        processed.append({
+            'id': hotel.get('id') or f"booking_{i}",
+            'name': hotel.get('name', 'Unknown Hotel'),
+            'address': hotel.get('address', city_info['name']),
+            'coordinates': [float(hotel.get('latitude', city_info['coordinates'][0])), float(hotel.get('longitude', city_info['coordinates'][1]))],
+            'price': price,
+            'rating': rating or 4.0,
+            'source': 'booking.com',
+            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'booking_url': create_booking_url(hotel, city_info, search_params)
+        })
+    return processed
+
+def process_tripadvisor_hotels(hotels_data, city_info, search_params):
+    processed = []
+    hotels_to_process = hotels_data[:TRIPADVISOR_HOTEL_LIMIT]
+    for i, hotel in enumerate(hotels_to_process):
+        price = 'N/A'
+        price_str = hotel.get('priceForDisplay')
+        if price_str:
+            numbers = URL_REGEX.findall(price_str.replace(',', ''))
+            if numbers:
+                price = int(numbers[0])
+
+        processed.append({
+            'id': hotel.get('id') or f"tripadvisor_{i}",
+            'name': hotel.get('title', 'Unknown Hotel'),
+            'address': city_info['name'],
+            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', city_info['coordinates'][0])), float(hotel.get('geoSummary', {}).get('longitude', city_info['coordinates'][1]))],
+            'price': price,
+            'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
+            'source': 'tripadvisor',
+            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'booking_url': f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
+        })
+    return processed
+
+# --- URL & Fallback Generators ---
+
+def create_booking_url(hotel, city_info, params):
+    country_code_map = {
+        'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es',
+        'it': 'it', 'de': 'de', 'nl': 'nl'
+    }
+    domain_suffix = country_code_map.get(city_info['country'], city_info['country']) + '.html'
     
-    def _extract_rating(self, hotel):
-        """Extract and normalize rating from hotel data"""
-        rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
-        if rating:
-            rating = float(rating) / 2 if rating > 5 else float(rating)
-        else:
-            rating = 4.0
-        return round(rating, 1)
-    
-    def _get_room_description(self, hotel_name, room_type):
-        """Generate room-specific description"""
-        room_info = ROOM_TYPES[room_type]
+    base_params = {
+        'ss': hotel.get('name', 'Hotel'),
+        'checkin': params['checkin'],
+        'checkout': params['checkout'],
+        **ROOM_TYPES.get(params['room_type'], {}).get('booking_params', {})
+    }
+    query_string = urlencode(base_params)
+    return f"https://www.booking.com/searchresults.{domain_suffix}?{query_string}"
+
+def get_demo_hotels(city_info, room_type, source):
+    logging.warning(f"Using fallback DEMO data for {city_info['name']} from {source}.")
+    demo_templates = [
+        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 250, 'rating': 4.5},
+        {'name': f'Central Plaza {city_info["name"].split(",")[0]}', 'price': 150, 'rating': 4.1},
+        {'name': f'Riverside Inn {city_info["name"].split(",")[0]}', 'price': 120, 'rating': 3.9}
+    ]
+    processed_demos = []
+    for i, demo in enumerate(demo_templates):
+        base_lat = city_info['coordinates'][0]
+        base_lon = city_info['coordinates'][1]
+        offset = i * 0.01 - 0.01
         
-        # Check if hotel name matches room type keywords
-        hotel_lower = hotel_name.lower()
-        for keyword in room_info['keywords']:
-            if keyword in hotel_lower:
-                return f"{room_info['description']} - Perfect match!"
-        
-        return room_info['description']
-    
-    def _create_enhanced_booking_url(self, hotel, city_info, checkin, checkout, adults, rooms, room_type):
-        """Create optimized booking URL with hotel name and room type"""
-        hotel_id = hotel.get('id') or hotel.get('hotel_id')
-        hotel_name = hotel.get('name', 'Hotel')
-        country_code = city_info['country']
-        
-        if hotel_id and hotel_name:
-            # Get localized domain
-            domain_suffix = BOOKING_DOMAINS.get(country_code, 'en-gb.html')
-            
-            # Build parameters
-            base_params = {
-                'ss': hotel_name,
-                'dest_id': hotel_id,
-                'dest_type': 'hotel',
-                'checkin': checkin,
-                'checkout': checkout,
-                'group_adults': adults,
-                'no_rooms': rooms,
-                'group_children': ROOM_TYPES[room_type].get('children', 0),
-                'search_selected': 'true'
-            }
-            
-            # Add room type specific parameters
-            if room_type == 'junior_suite':
-                base_params['room_type'] = 'junior_suite'
-            elif room_type == 'suite':
-                base_params['room_type'] = 'suite'
-            elif room_type == 'family':
-                base_params['family_rooms'] = '1'
-            
-            # Build URL
-            params_string = urlencode(base_params, quote_via=quote_plus)
-            return f"https://www.booking.com/searchresults.{domain_suffix}?{params_string}"
-        
-        # Fallback URL
-        domain_suffix = BOOKING_DOMAINS.get(country_code, 'en-gb.html')
-        return f"https://www.booking.com/searchresults.{domain_suffix}?ss={quote_plus(hotel_name)}"
-    
-    def _generate_demo_data(self, city_key, room_type):
-        """Generate realistic demo data when APIs fail"""
-        city_info = CITIES[city_key]
-        demo_hotels = []
-        
-        # Base hotel names by city
-        hotel_templates = {
-            'stockholm': ['Hotel Diplomat', 'Scandic Continental', 'Elite Palace', 'Clarion Sign'],
-            'paris': ['Hotel Ritz', 'Le Bristol', 'Shangri-La', 'Hotel Plaza Athénée'],
-            'london': ['The Savoy', 'Claridge\'s', 'The Langham', 'Park Lane Hotel'],
-            'default': ['Grand Hotel', 'Royal Palace', 'Central Plaza', 'Premium Inn']
+        demo_hotel = {
+            'id': f"demo_{source}_{i}", 'name': demo['name'], 'address': city_info['name'],
+            'coordinates': [base_lat + offset, base_lon + offset],
+            'price': demo['price'], 'rating': demo['rating'], 'source': source,
+            'room_type': ROOM_TYPES.get(room_type, {}).get('name'),
+            'booking_url': f"https://www.{source.split('.')[0]}.com/"
         }
+        processed_demos.append(demo_hotel)
         
-        base_names = hotel_templates.get(city_key, hotel_templates['default'])
+    return processed_demos
+
+# --- Unified API Route Handler ---
+
+def handle_hotel_search(source):
+    today = datetime.now()
+    params = {
+        'city': request.args.get('city', 'stockholm').lower(),
+        'room_type': request.args.get('room_type', 'double').lower(),
+        'checkin': request.args.get('checkin', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
+        'checkout': request.args.get('checkout', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
+        'adults': request.args.get('adults', '2'),
+        'rooms': request.args.get('rooms', '1')
+    }
+    if params['city'] not in CITIES:
+        return jsonify({'error': f"City '{params['city']}' not supported"}), 400
+    if params['room_type'] not in ROOM_TYPES:
+        return jsonify({'error': f"Room type '{params['room_type']}' not supported"}), 400
+
+    city_info = CITIES[params['city']]
+    processed_hotels = []
+    data_source = 'live_api'
+
+    try:
+        api_data = None
+        if source == 'booking':
+            location_id = get_booking_location_id(city_info['search_query'])
+            if location_id:
+                api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
+                if api_data:
+                    processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
         
-        for i, base_name in enumerate(base_names[:20]):
-            # Add room type to name if relevant
-            if room_type == 'junior_suite':
-                hotel_name = f"{base_name} Junior Suite"
-            elif room_type == 'suite':
-                hotel_name = f"{base_name} Executive Suite"
-            else:
-                hotel_name = base_name
-            
-            # Generate realistic coordinates around city center
-            base_lat, base_lng = city_info['coordinates']
-            coordinates = [
-                base_lat + random.uniform(-0.05, 0.05),
-                base_lng + random.uniform(-0.05, 0.05)
-            ]
-            
-            # Generate realistic prices based on room type
-            base_price = random.randint(80, 300)
-            if room_type == 'junior_suite':
-                price = int(base_price * 1.4)
-            elif room_type == 'suite':
-                price = int(base_price * 1.8)
-            elif room_type == 'single':
-                price = int(base_price * 0.7)
-            else:
-                price = base_price
-            
-            demo_hotel = {
-                'id': f"demo_{city_key}_{i}",
-                'name': hotel_name,
-                'address': f"{city_info['name']} City Center",
-                'coordinates': coordinates,
-                'price': price,
-                'rating': round(random.uniform(3.5, 4.8), 1),
-                'room_type': ROOM_TYPES[room_type]['name'],
-                'room_description': ROOM_TYPES[room_type]['description'],
-                'booking_url': f"https://www.booking.com/searchresults.{BOOKING_DOMAINS.get(city_info['country'], 'en-gb.html')}?ss={quote_plus(hotel_name)}",
-                'source': 'demo_data'
-            }
-            
-            demo_hotels.append(demo_hotel)
-        
-        return {
-            'source': 'demo_data',
+        elif source == 'tripadvisor':
+            geo_id = city_info.get('tripadvisor_id')
+            if geo_id:
+                api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
+                if api_data:
+                    processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
+
+        if not processed_hotels:
+            data_source = 'demo_fallback'
+            processed_hotels = get_demo_hotels(city_info, params['room_type'], source)
+
+        return jsonify({
             'city': city_info['name'],
-            'hotels': demo_hotels,
-            'total_found': len(demo_hotels)
-        }
+            'hotels': processed_hotels,
+            'total_found': len(processed_hotels),
+            'search_params': params,
+            'source': source,
+            'data_source': data_source
+        })
 
-# =============================================================================
-# FLASK APPLICATION ROUTES
-# =============================================================================
+    except Exception as e:
+        logging.critical(f"Unhandled exception in handle_hotel_search for source '{source}': {e}", exc_info=True)
+        return jsonify({'error': 'An unexpected internal server error occurred.'}), 500
 
-# Initialize API Manager
-api_manager = APIManager()
-
+# --- Flask Routes ---
 @app.route('/')
 def home():
-    """Enhanced API Documentation"""
-    return render_template_string('''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🏨 STAYFINDR Backend API v2.0</title>
-        <style>
-            body { font-family: 'Segoe UI', sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; 
-                   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-            .container { background: rgba(255,255,255,0.95); color: #333; padding: 40px; border-radius: 20px; }
-            h1 { color: #2c3e50; text-align: center; }
-            .endpoint { background: #f8f9fa; padding: 20px; margin: 15px 0; border-radius: 12px; border-left: 4px solid #3498db; }
-            .feature { background: #e8f5e8; padding: 15px; margin: 15px 0; border-radius: 8px; }
-            .room-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
-            .room-type { background: #e3f2fd; padding: 15px; border-radius: 8px; text-align: center; }
-            .cities { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 20px 0; }
-            .city { background: #ffeaa7; padding: 8px; border-radius: 4px; text-align: center; font-size: 0.9em; }
-            .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
-            .stat { background: #fd79a8; color: white; padding: 20px; border-radius: 10px; text-align: center; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🏨 STAYFINDR Backend API v2.0</h1>
-            <p style="text-align: center; font-size: 1.2em;">Production-ready multi-platform hotel search with intelligent fallback</p>
-            
-            <div class="stats">
-                <div class="stat">
-                    <h3>29</h3>
-                    <p>European Cities</p>
-                </div>
-                <div class="stat">
-                    <h3>5</h3>
-                    <p>Room Types</p>
-                </div>
-                <div class="stat">
-                    <h3>99.9%</h3>
-                    <p>Uptime</p>
-                </div>
-            </div>
-            
-            <div class="feature">
-                <strong>✅ NEW v2.0 Features:</strong><br>
-                • Multi-platform API integration (Booking.com + Hotels.com)<br>
-                • Intelligent fallback with demo data<br>
-                • Room type filtering with Junior Suite support<br>
-                • Enhanced caching for 15-minute data retention<br>
-                • Localized booking URLs for all 29 countries
-            </div>
-            
-            <h2>🚀 API Endpoints:</h2>
-            
-            <div class="endpoint">
-                <strong>GET /api/hotels</strong> - Advanced hotel search<br>
-                <code>Parameters: city, checkin, checkout, adults, rooms, room_type</code><br>
-                <em>Multi-source aggregation with intelligent caching</em><br>
-                <strong>Example:</strong> <code>/api/hotels?city=paris&room_type=junior_suite&adults=2</code>
-            </div>
-            
-            <div class="endpoint">
-                <strong>GET /api/cities</strong> - List all supported destinations<br>
-                <em>Complete city metadata with coordinates</em>
-            </div>
-            
-            <div class="endpoint">
-                <strong>GET /api/room-types</strong> - Available room configurations<br>
-                <em>Including Junior Suite with detailed descriptions</em>
-            </div>
-            
-            <div class="endpoint">
-                <strong>GET /test</strong> - Live Stockholm demo<br>
-                <em>Real-time API testing with room type demonstration</em>
-            </div>
-            
-            <h2>🏨 Room Types Available:</h2>
-            <div class="room-types">
-                {% for key, room in room_types.items() %}
-                <div class="room-type">
-                    <strong>{{ room.name }}</strong><br>
-                    {{ room.description }}<br>
-                    <small>{{ room.guests }} guest{{ 's' if room.guests > 1 else '' }}</small>
-                </div>
-                {% endfor %}
-            </div>
-            
-            <h2>🌍 Supported Cities:</h2>
-            <div class="cities">
-                {% for city_key, city in cities.items() %}
-                <div class="city">{{ city.name }}</div>
-                {% endfor %}
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px; padding: 20px; background: #f39c12; border-radius: 10px;">
-                <strong>🎯 Ready for Production</strong><br>
-                Frontend: <a href="https://joa312.github.io/stayfindr/" style="color: white;">https://joa312.github.io/stayfindr/</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    ''', cities=CITIES, room_types=ROOM_TYPES)
+    return render_template_string('<h1>STAYFINDR Backend v6.3</h1><p>City data is now loaded from cities.csv</p>')
 
 @app.route('/api/cities')
-def get_cities():
-    """Get all supported cities with metadata"""
-    return jsonify({
-        'cities': CITIES,
-        'total': len(CITIES),
-        'supported_countries': list(set([city['country'] for city in CITIES.values()]))
-    })
+def get_cities_route():
+    return jsonify({'cities': CITIES, 'total': len(CITIES)})
 
 @app.route('/api/room-types')
-def get_room_types():
-    """Get all available room types"""
-    return jsonify({
-        'room_types': ROOM_TYPES,
-        'total': len(ROOM_TYPES),
-        'junior_suite_available': True
-    })
+def get_room_types_route():
+    return jsonify({'room_types': ROOM_TYPES, 'total': len(ROOM_TYPES)})
+
+@app.route('/api/hotels/booking')
+def get_booking_hotels_route():
+    return handle_hotel_search(source='booking')
+
+@app.route('/api/hotels/tripadvisor')
+def get_tripadvisor_hotels_route():
+    return handle_hotel_search(source='tripadvisor')
 
 @app.route('/api/hotels')
-def get_hotels():
-    """Advanced multi-platform hotel search with room type filtering"""
-    # Extract parameters
-    city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'))
-    checkout = request.args.get('checkout', (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'))
-    adults = request.args.get('adults', '2')
-    rooms = request.args.get('rooms', '1')
-    room_type = request.args.get('room_type', 'double')
-    
-    # Validate inputs
-    if city not in CITIES:
-        return jsonify({'error': f'City {city} not supported'}), 400
-    
-    if room_type not in ROOM_TYPES:
-        return jsonify({'error': f'Room type {room_type} not supported'}), 400
-    
-    try:
-        # Validate dates
-        checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
-        checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
-        
-        if checkin_date >= checkout_date:
-            return jsonify({'error': 'Check-out date must be after check-in date'}), 400
-        
-        if checkin_date < datetime.now().date():
-            return jsonify({'error': 'Check-in date cannot be in the past'}), 400
-            
-    except ValueError:
-        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
-    
-    # Search hotels using multi-platform approach
-    try:
-        result = api_manager.search_hotels_multi_source(
-            city, checkin, checkout, adults, rooms, room_type
-        )
-        
-        # Enhanced response with room type information
-        enhanced_result = {
-            'city': result['city'],
-            'hotels': result['hotels'],
-            'total_found': result['total_found'],
-            'search_params': {
-                'city': city,
-                'checkin': checkin,
-                'checkout': checkout,
-                'adults': adults,
-                'rooms': rooms,
-                'room_type': room_type
-            },
-            'room_filter': {
-                'enabled': True,
-                'selected_type': ROOM_TYPES[room_type]['name'],
-                'description': ROOM_TYPES[room_type]['description'],
-                'guests': ROOM_TYPES[room_type]['guests']
-            },
-            'api_info': {
-                'source': result['source'],
-                'version': '2.0',
-                'cached': 'cache_hit' if result.get('cached') else 'fresh_data',
-                'localization': 'enabled',
-                'url_type': 'hotel_name_based_with_room_filter'
-            }
-        }
-        
-        return jsonify(enhanced_result)
-        
-    except Exception as e:
-        return jsonify({
-            'error': 'Search failed',
-            'message': str(e),
-            'fallback': 'demo_data_available'
-        }), 500
+def get_hotels_legacy_route():
+    return handle_hotel_search(source='booking')
 
 @app.route('/test')
-def test_stockholm():
-    """Test endpoint with Stockholm hotels - demonstrates Junior Suite"""
-    try:
-        # Direct call to API manager with Junior Suite - NO request.args manipulation
-        result = api_manager.search_hotels_multi_source(
-            'stockholm', 
-            (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
-            (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
-            '2', 
-            '1', 
-            'junior_suite'
-        )
-        
-        # Enhanced test response
-        return jsonify({
-            'city': result['city'],
-            'hotels': result['hotels'],
-            'total_found': result['total_found'],
-            'search_params': {
-                'city': 'stockholm',
-                'checkin': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
-                'checkout': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
-                'adults': '2',
-                'rooms': '1',
-                'room_type': 'junior_suite'
-            },
-            'room_filter': {
-                'enabled': True,
-                'selected_type': 'Junior Suite',
-                'description': 'Spacious room with sitting area - upgraded comfort',
-                'guests': 2
-            },
-            'api_info': {
-                'source': result['source'],
-                'version': '2.0',
-                'test_mode': True,
-                'test_description': 'Stockholm Junior Suite demonstration',
-                'localization': 'enabled',
-                'url_type': 'hotel_name_based_with_room_filter'
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'error': 'Test search failed',
-            'message': str(e),
-            'test_mode': True,
-            'fallback': 'Demo data should be available',
-            'api_info': {
-                'version': '2.0',
-                'test_endpoint': True
-            }
-        }), 500
+def test_endpoint_route():
+    return jsonify({'status': 'STAYFINDR Backend v6.3 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
 
-@app.route('/api/analytics')
-def get_analytics():
-    """Basic analytics endpoint for monitoring"""
-    return jsonify({
-        'cache_stats': {
-            'total_entries': len(api_manager.cache),
-            'cache_ttl_minutes': api_manager.cache_ttl // 60
-        },
-        'supported_features': {
-            'cities': len(CITIES),
-            'room_types': len(ROOM_TYPES),
-            'countries': len(set([city['country'] for city in CITIES.values()])),
-            'booking_domains': len(BOOKING_DOMAINS)
-        },
-        'api_status': {
-            'version': '2.0',
-            'uptime': 'operational',
-            'multi_platform': True,
-            'intelligent_fallback': True,
-            'junior_suite_support': True
-        }
-    })
-
-@app.route('/api/health')
-def health_check():
-    """Health check endpoint for monitoring"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'version': '2.0',
-        'services': {
-            'booking_api': 'operational',
-            'cache_system': 'operational',
-            'demo_fallback': 'operational'
-        }
-    })
-
-@app.errorhandler(404)
-def not_found(error):
-    """Custom 404 handler"""
-    return jsonify({
-        'error': 'Endpoint not found',
-        'available_endpoints': [
-            '/api/hotels',
-            '/api/cities', 
-            '/api/room-types',
-            '/api/analytics',
-            '/api/health',
-            '/test'
-        ]
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    """Custom 500 handler"""
-    return jsonify({
-        'error': 'Internal server error',
-        'fallback': 'Demo data available via /test endpoint',
-        'support': 'Contact support if issue persists'
-    }), 500
-
-# =============================================================================
-# APPLICATION STARTUP
-# =============================================================================
-
+# --- Application Startup ---
 if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend v2.0...")
-    print("🏨 Supporting 29 European cities with 5 room types")
-    print("🌟 NEW: Junior Suite support with enhanced descriptions")
-    print("🔄 Multi-platform API integration with intelligent fallback")
-    print("💾 15-minute caching for optimal performance")
-    print("🌍 Localized booking URLs for all European countries")
-    print("🔗 Frontend connects to this backend")
-    print("📋 Test API: /test (Junior Suite demo)")
-    print("📊 Analytics: /api/analytics")
-    print("❤️  Health check: /api/health")
-    print("✅ Production-ready architecture activated")
-    
-    # Use PORT environment variable for deployment (Render, Heroku, etc.)
+    logging.info("🚀 Starting STAYFINDR Backend v6.3...")
+    logging.info("▶️ Now loading city data from cities.csv.")
+    is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
-    
-    # Production vs Development settings
-    if os.environ.get('FLASK_ENV') == 'production':
-        app.run(host='0.0.0.0', port=port, debug=False)
-    else:
-        app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(debug=not is_production, host='0.0.0.0', port=port)
