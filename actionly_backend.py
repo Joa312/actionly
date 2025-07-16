@@ -1,10 +1,8 @@
-# STAYFINDR BACKEND v5.1 - Production-Ready & Corrected
+# STAYFINDR BACKEND v5.2 - Production-Ready & Final Correction
+# Contains final fix for all SyntaxErrors from line wrapping.
 # Unified API logic, caching, enhanced security, and robust logging.
-# Integrates Booking.com + TripAdvisor with professional fallbacks.
-# Contains fix for SyntaxError from line wrapping.
 
 import os
-import json
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus
@@ -30,7 +28,7 @@ if not RAPIDAPI_KEY:
 # CORS Configuration for frontend
 CORS(app, origins=[
     "https://joa312.github.io",
-    "http://127.0.0.1:5500", # Common for Live Server
+    "http://127.0.0.1:5500",
     "http://localhost:3000",
     "http://127.0.0.1:5000"
 ])
@@ -108,8 +106,62 @@ def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
 def process_booking_hotels(hotels_data, city_info, search_params):
     """Process a list of hotels from Booking.com API response."""
     processed = []
-    for i, hotel in enumerate(hotels_data[:20]): # Limit results
+    for i, hotel in enumerate(hotels_data[:20]):
         price = 'N/A'
         if price_info := hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value'):
             nights = (datetime.strptime(search_params['checkout'], '%Y-%m-%d') - datetime.strptime(search_params['checkin'], '%Y-%m-%d')).days
-            price = int(price_info / nights) if nights > 0
+            # This is the corrected line that now includes the 'else' part.
+            price = int(price_info / nights) if nights > 0 else int(price_info)
+        
+        rating = hotel.get('reviewScore', 0.0)
+        rating = round(float(rating) / 2, 1) if rating > 5 else round(float(rating), 1)
+
+        processed.append({
+            'id': hotel.get('id') or f"booking_{i}",
+            'name': hotel.get('name', 'Unknown Hotel'),
+            'address': hotel.get('address', city_info['name']),
+            'coordinates': [float(hotel.get('latitude', city_info['coordinates'][0])), float(hotel.get('longitude', city_info['coordinates'][1]))],
+            'price': price,
+            'rating': rating or 4.0,
+            'source': 'booking.com',
+            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'booking_url': create_booking_url(hotel, city_info, search_params)
+        })
+    return processed
+
+def process_tripadvisor_hotels(hotels_data, city_info, search_params):
+    """Process a list of hotels from TripAdvisor API response."""
+    processed = []
+    for i, hotel in enumerate(hotels_data[:15]):
+        price = 'N/A'
+        if price_str := hotel.get('priceForDisplay'):
+            if numbers := URL_REGEX.findall(price_str.replace(',', '')):
+                price = int(numbers[0])
+
+        processed.append({
+            'id': hotel.get('id') or f"tripadvisor_{i}",
+            'name': hotel.get('title', 'Unknown Hotel'),
+            'address': city_info['name'],
+            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', city_info['coordinates'][0])), float(hotel.get('geoSummary', {}).get('longitude', city_info['coordinates'][1]))],
+            'price': price,
+            'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
+            'source': 'tripadvisor',
+            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'booking_url': f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
+        })
+    return processed
+
+# --- URL & Fallback Generators ---
+
+def create_booking_url(hotel, city_info, params):
+    """Creates an optimized Booking.com URL."""
+    country_code_map = {'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es', 'it': 'it', 'de': 'de', 'nl': 'nl'}
+    domain_suffix = country_code_map.get(city_info['country'], city_info['country']) + '.html'
+    
+    base_params = {
+        'ss': hotel.get('name', 'Hotel'),
+        'checkin': params['checkin'],
+        'checkout': params['checkout'],
+        **ROOM_TYPES.get(params['room_type'], {}).get('booking_params', {})
+    }
+    query_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in
