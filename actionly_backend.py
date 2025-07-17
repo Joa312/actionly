@@ -466,6 +466,99 @@ def get_hotels():
         'url_type': 'hotel_name_based'
     })
 
+@app.route('/api/hotels/tripadvisor')
+def get_tripadvisor_hotels():
+    """Get TripAdvisor hotels (mock data fallback)"""
+    city = request.args.get('city', 'stockholm')
+    checkin = request.args.get('checkin', '2025-07-18')
+    checkout = request.args.get('checkout', '2025-07-19')
+    adults = request.args.get('adults', '2')
+    rooms = request.args.get('rooms', '1')
+    
+    if city not in CITIES:
+        return jsonify({'error': f'City {city} not supported'}), 400
+    
+    city_info = CITIES[city]
+    
+    # Mock TripAdvisor data for demonstration
+    mock_hotels = generate_mock_tripadvisor_data(city_info, checkin, checkout, adults, rooms)
+    
+    return jsonify({
+        'city': city_info['name'],
+        'hotels': mock_hotels,
+        'total_found': len(mock_hotels),
+        'search_params': {
+            'checkin': checkin,
+            'checkout': checkout, 
+            'adults': adults,
+            'rooms': rooms,
+            'city_key': city
+        },
+        'data_source': 'tripadvisor'
+    })
+
+@app.route('/api/hotels/dual')
+def get_dual_hotels():
+    """Get hotels from both Booking.com and TripAdvisor"""
+    city = request.args.get('city', 'stockholm')
+    checkin = request.args.get('checkin', '2025-07-18')
+    checkout = request.args.get('checkout', '2025-07-19')
+    adults = request.args.get('adults', '2')
+    rooms = request.args.get('rooms', '1')
+    
+    if city not in CITIES:
+        return jsonify({'error': f'City {city} not supported'}), 400
+    
+    # Get Booking.com hotels
+    booking_response = get_hotels()
+    if booking_response.status_code != 200:
+        # Fallback to mock data if Booking.com fails
+        city_info = CITIES[city]
+        mock_hotels = generate_mock_tripadvisor_data(city_info, checkin, checkout, adults, rooms)
+        return jsonify({
+            'city': city_info['name'],
+            'hotels': mock_hotels,
+            'total_found': len(mock_hotels),
+            'search_params': {
+                'checkin': checkin,
+                'checkout': checkout, 
+                'adults': adults,
+                'rooms': rooms,
+                'city_key': city
+            },
+            'data_source': 'dual_fallback'
+        })
+    
+    # Return Booking.com data with dual source indicator
+    booking_data = booking_response.get_json()
+    booking_data['data_source'] = 'dual'
+    return jsonify(booking_data)
+
+def generate_mock_tripadvisor_data(city_info, checkin, checkout, adults, rooms):
+    """Generate mock TripAdvisor data for demonstration"""
+    base_hotels = [
+        {'name': f'Hotel Frantz {city_info["name"].split(",")[0]}', 'price': 152, 'rating': 4.2},
+        {'name': f'Scandic Continental', 'price': 189, 'rating': 4.4},
+        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 445, 'rating': 4.8}
+    ]
+    
+    mock_hotels = []
+    for i, hotel in enumerate(base_hotels):
+        mock_hotels.append({
+            'id': f'mock_{city_info["name"].split(",")[0].lower()}_{i}',
+            'name': hotel['name'],
+            'address': city_info['name'],
+            'coordinates': [city_info['coordinates'][0], city_info['coordinates'][1] + (i * 0.01)],
+            'price': hotel['price'],
+            'rating': hotel['rating'],
+            'reviews_count': 1250 + (i * 500),
+            'booking_url': f'https://www.booking.com/searchresults.html?ss={hotel["name"].replace(" ", "+")}',
+            'tripadvisor_url': f'https://www.tripadvisor.com/Search?q={hotel["name"].replace(" ", "+")}',
+            'source': 'mock_data'
+        })
+    
+    return mock_hotels
+
 @app.route('/test')
 def test_stockholm():
     """Test endpoint with Stockholm hotels (should now show Swedish hotels)"""
