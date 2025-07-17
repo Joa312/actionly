@@ -1,7 +1,6 @@
 # STAYFINDR BACKEND v8.9 - Final Corrected Logic
-# FINAL FIX: Corrected the extraction path for TripAdvisor's 'contentId' based on user-provided documentation.
-# The previous version was looking in the wrong place, causing the two-step search to fail.
-# This version uses the correct, deeply-nested path, which should be the definitive fix.
+# FINAL FIX: Cleaned up all indentation and whitespace characters to resolve Python syntax errors.
+# This version maintains the correct dynamic search logic for both Booking.com and TripAdvisor.
 
 import os
 import logging
@@ -180,7 +179,6 @@ def handle_hotel_search(source):
             
             hotel_list = search_tripadvisor_hotels_list(geo_id)
             for hotel_summary in hotel_list[:TRIPADVISOR_HOTEL_LIMIT]:
-                # KORRIGERING: Använder den korrekta, djupt nästlade sökvägen för att hitta contentId.
                 content_id = hotel_summary.get('cardLink', {}).get('route', {}).get('typedParams', {}).get('contentId')
                 if not content_id: 
                     logging.warning(f"Could not find contentId for hotel: {hotel_summary.get('title')}")
