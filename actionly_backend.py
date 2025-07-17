@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """
-STAYFINDR Backend API - Dual Integration
+STAYFINDR Backend API - Flask Version
 European Hotel Search Engine med BÅDE Booking.com OCH TripAdvisor
-Version: 2.0 - Dual Platform Edition
+Version: 2.0 - Flask Dual Platform Edition
 """
 
 import csv
 import os
 import logging
-import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from urllib.parse import quote_plus
 
 import requests
-from fastapi import FastAPI, Query, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator
-import uvicorn
+from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
 
 # Logging konfiguration
 logging.basicConfig(
@@ -27,28 +24,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# FastAPI app initiering
-app = FastAPI(
-    title="STAYFINDR API - Dual Platform",
-    description="European Hotel Search with BOTH Booking.com AND TripAdvisor integration",
-    version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-)
+# Flask app initiering
+app = Flask(__name__)
+CORS(app)
 
 # API konfiguration
 BOOKING_HOST = "booking-com15.p.rapidapi.com"
 TRIPADVISOR_HOST = "tripadvisor1.p.rapidapi.com"
-API_KEY = os.getenv("RAPIDAPI_KEY", "YOUR_RAPIDAPI_KEY")
+API_KEY = os.getenv("RAPIDAPI_KEY", "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999")
 
 BOOKING_HEADERS = {
     "X-RapidAPI-Key": API_KEY,
@@ -83,7 +66,7 @@ COUNTRY_CODES = {
     'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
 }
 
-# TripAdvisor location mappings (exempel för testing)
+# TripAdvisor location mappings
 TRIPADVISOR_LOCATIONS = {
     'stockholm': '189839',
     'paris': '187147', 
@@ -94,61 +77,23 @@ TRIPADVISOR_LOCATIONS = {
     'berlin': '187323',
     'copenhagen': '189541',
     'vienna': '190454',
-    'prague': '274707'
+    'prague': '274707',
+    'madrid': '187514',
+    'milan': '187849',
+    'zurich': '188113',
+    'oslo': '190479',
+    'helsinki': '189896',
+    'warsaw': '274856',
+    'budapest': '274887',
+    'dublin': '186605',
+    'lisbon': '189158',
+    'athens': '189398'
 }
-
-# Pydantic models
-class HotelSearchRequest(BaseModel):
-    city: str = Field(..., min_length=2, max_length=50, description="City name")
-    checkin_date: str = Field(..., description="Check-in date (YYYY-MM-DD)")
-    checkout_date: str = Field(..., description="Check-out date (YYYY-MM-DD)")
-    room_number: int = Field(1, ge=1, le=10, description="Number of rooms")
-    guest_number: int = Field(2, ge=1, le=20, description="Number of guests")
-    room_type: Optional[str] = Field(None, description="Room type filter")
-    
-    @validator('checkin_date', 'checkout_date')
-    def validate_date_format(cls, v):
-        try:
-            datetime.strptime(v, '%Y-%m-%d')
-            return v
-        except ValueError:
-            raise ValueError('Date must be in YYYY-MM-DD format')
-    
-    @validator('checkout_date')
-    def validate_checkout_after_checkin(cls, v, values):
-        if 'checkin_date' in values:
-            checkin = datetime.strptime(values['checkin_date'], '%Y-%m-%d')
-            checkout = datetime.strptime(v, '%Y-%m-%d')
-            if checkout <= checkin:
-                raise ValueError('Checkout date must be after checkin date')
-            if (checkout - checkin).days > 30:
-                raise ValueError('Stay cannot be longer than 30 days')
-        return v
-
-class HotelResponse(BaseModel):
-    id: str
-    name: str
-    address: str
-    coordinates: List[float]
-    price: str
-    rating: float
-    booking_url: str  # Booking.com URL
-    tripadvisor_url: str  # TripAdvisor URL - NY!
-    reviews_count: Optional[int] = None
-    room_type_match: Optional[str] = None
-
-class SearchResponse(BaseModel):
-    city: str
-    hotels: List[HotelResponse]
-    total_found: int
-    search_params: Dict[str, Any]
-    room_filter: Optional[str] = None
-    data_sources: List[str] = ["Booking.com", "TripAdvisor"]
 
 # Helper functions
 def validate_api_key():
     """Validera API-nyckel"""
-    if API_KEY == "YOUR_RAPIDAPI_KEY" or not API_KEY:
+    if not API_KEY or API_KEY == "YOUR_RAPIDAPI_KEY":
         logger.error("API key not configured")
         return False
     return True
@@ -158,8 +103,21 @@ def get_city_id(city_name: str) -> Optional[str]:
     csv_file = "cities.csv"
     
     if not os.path.exists(csv_file):
-        logger.error(f"Cities CSV file not found: {csv_file}")
-        return None
+        logger.warning(f"Cities CSV file not found: {csv_file}")
+        # Fallback mapping för vanliga städer
+        fallback_cities = {
+            'stockholm': '1371',
+            'paris': '-1456928',
+            'london': '-2601889',
+            'barcelona': '-372490',
+            'rome': '-126693',
+            'amsterdam': '-2140479',
+            'berlin': '-1746443',
+            'copenhagen': '-2745240',
+            'vienna': '-1995499',
+            'prague': '-553173'
+        }
+        return fallback_cities.get(city_name.lower())
     
     try:
         with open(csv_file, newline="", encoding="utf-8") as csvfile:
@@ -196,10 +154,12 @@ def search_hotels_booking_api(dest_id: str, checkin: str, checkout: str,
     
     try:
         response = requests.get(url, headers=BOOKING_HEADERS, params=params, timeout=30)
+        logger.info(f"Booking.com API call: {response.status_code}")
+        
         if response.status_code == 200:
             return response.json()
         else:
-            logger.error(f"Booking.com API error: {response.status_code}")
+            logger.error(f"Booking.com API error: {response.status_code} - {response.text}")
             return None
     except Exception as e:
         logger.error(f"Error calling Booking.com API: {e}")
@@ -220,10 +180,12 @@ def get_tripadvisor_hotels(location_id: str, limit: int = 30) -> Optional[Dict]:
     
     try:
         response = requests.get(url, headers=TRIPADVISOR_HEADERS, params=params, timeout=30)
+        logger.info(f"TripAdvisor API call: {response.status_code}")
+        
         if response.status_code == 200:
             return response.json()
         else:
-            logger.error(f"TripAdvisor API error: {response.status_code}")
+            logger.error(f"TripAdvisor API error: {response.status_code} - {response.text}")
             return None
     except Exception as e:
         logger.error(f"Error calling TripAdvisor API: {e}")
@@ -246,7 +208,7 @@ def find_tripadvisor_hotel_by_name(hotel_name: str, tripadvisor_hotels: List[Dic
     # Partiell matchning som backup
     for ta_hotel in tripadvisor_hotels:
         ta_name = ta_hotel.get('name', '').lower().strip()
-        # Kontrollera om hotellnamnen överlappar med minst 3 ord
+        # Kontrollera om hotellnamnen överlappar med minst 2 ord
         booking_words = set(normalized_booking_name.split())
         ta_words = set(ta_name.split())
         
@@ -344,7 +306,7 @@ def analyze_room_type_match(hotel: Dict, requested_room_type: Optional[str]) -> 
 
 def process_dual_hotel_data(booking_hotels: List[Dict], tripadvisor_hotels: List[Dict],
                            city_key: str, checkin: str, checkout: str, 
-                           adults: int, rooms: int, room_type: Optional[str] = None) -> List[HotelResponse]:
+                           adults: int, rooms: int, room_type: Optional[str] = None) -> List[Dict]:
     """Bearbeta hotelldata från BÅDA källorna"""
     processed_hotels = []
     
@@ -396,20 +358,20 @@ def process_dual_hotel_data(booking_hotels: List[Dict], tripadvisor_hotels: List
             )
             
             # Skapa hotel response
-            hotel_response = HotelResponse(
-                id=booking_hotel.get('id', f'hotel_{i}'),
-                name=hotel_name,
-                address=address,
-                coordinates=coordinates,
-                price=price,
-                rating=rating,
-                booking_url=booking_url,
-                tripadvisor_url=tripadvisor_url,  # NY: TripAdvisor URL
-                reviews_count=reviews_count,
-                room_type_match=room_match
-            )
+            hotel_data = {
+                "id": booking_hotel.get('id', f'hotel_{i}'),
+                "name": hotel_name,
+                "address": address,
+                "coordinates": coordinates,
+                "price": price,
+                "rating": rating,
+                "booking_url": booking_url,
+                "tripadvisor_url": tripadvisor_url,  # NY: TripAdvisor URL
+                "reviews_count": reviews_count,
+                "room_type_match": room_match
+            }
             
-            processed_hotels.append(hotel_response)
+            processed_hotels.append(hotel_data)
             
         except Exception as e:
             logger.error(f"Error processing hotel {i}: {e}")
@@ -417,67 +379,123 @@ def process_dual_hotel_data(booking_hotels: List[Dict], tripadvisor_hotels: List
     
     return processed_hotels
 
-# API Endpoints
-@app.get("/", response_model=Dict[str, Any])
+# Flask Routes
+@app.route('/')
 def root():
     """Root endpoint med API information"""
-    return {
-        "message": "STAYFINDR Backend API v2.0 - Dual Platform Edition",
-        "status": "running",
-        "data_sources": ["Booking.com", "TripAdvisor"],
-        "features": ["Hotel search", "Dual booking links", "Room type filter"],
-        "docs": "/docs",
-        "health": "/health"
-    }
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🏨 STAYFINDR Backend API - Dual Platform</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+            h1 { color: #2c3e50; }
+            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
+            .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
+            .new { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 8px; }
+        </style>
+    </head>
+    <body>
+        <h1>🏨 STAYFINDR Backend API - Dual Platform Edition</h1>
+        <p>Flask backend for European hotel search with BOTH Booking.com AND TripAdvisor integration</p>
+        
+        <div class="new">
+            <strong>🆕 NEW: Dual Platform Integration</strong><br>
+            Every hotel now includes BOTH Booking.com booking links AND TripAdvisor review links
+        </div>
+        
+        <div class="feature">
+            <strong>✅ Features:</strong><br>
+            • Hotel search from Booking.com<br>
+            • TripAdvisor reviews and links<br>
+            • Room type filtering with Junior Suite<br>
+            • Localized booking URLs<br>
+            • Smart hotel matching between platforms
+        </div>
+        
+        <h2>Available endpoints:</h2>
+        <div class="endpoint">
+            <strong>POST /hotels</strong> - Search hotels with dual platform data<br>
+            Parameters: city, checkin_date, checkout_date, guest_number, room_number, room_type<br>
+            <em>Returns hotels with BOTH booking and TripAdvisor URLs</em>
+        </div>
+        <div class="endpoint">
+            <strong>GET /room-types</strong> - List all available room types
+        </div>
+        <div class="endpoint">
+            <strong>GET /cities</strong> - List all supported cities
+        </div>
+        <div class="endpoint">
+            <strong>GET /test</strong> - Test both APIs with Stockholm
+        </div>
+        <div class="endpoint">
+            <strong>GET /health</strong> - Health check
+        </div>
+        
+        <h2>Data Sources:</h2>
+        <p>✅ Booking.com (Primary hotel data + booking links)<br>
+        ✅ TripAdvisor (Reviews + additional hotel links)</p>
+        
+        <h2>Supported Cities:</h2>
+        <p>{{ cities|length }} European cities with dual platform support</p>
+    </body>
+    </html>
+    ''', cities=TRIPADVISOR_LOCATIONS)
 
-@app.get("/health")
+@app.route('/health')
 def health_check():
     """Health check endpoint"""
     api_key_valid = validate_api_key()
-    cities_file_exists = os.path.exists("cities.csv")
     
-    return {
-        "status": "healthy" if api_key_valid and cities_file_exists else "unhealthy",
+    return jsonify({
+        "status": "healthy" if api_key_valid else "unhealthy",
         "api_key": "configured" if api_key_valid else "missing",
-        "cities_file": "found" if cities_file_exists else "missing",
         "data_sources": ["Booking.com", "TripAdvisor"],
+        "supported_cities": len(TRIPADVISOR_LOCATIONS),
+        "room_types": list(ROOM_TYPE_MAPPING.keys()),
         "timestamp": datetime.now().isoformat()
-    }
+    })
 
-@app.post("/hotels", response_model=SearchResponse)
-def search_hotels(search: HotelSearchRequest):
+@app.route('/hotels', methods=['POST'])
+def search_hotels():
     """Sök hotell från BÅDA Booking.com OCH TripAdvisor"""
     
     # Validera API-nyckel
     if not validate_api_key():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API service not configured properly"
-        )
+        return jsonify({"error": "API service not configured properly"}), 503
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "JSON data required"}), 400
+    
+    # Extrahera parametrar
+    city = data.get('city')
+    checkin_date = data.get('checkin_date')
+    checkout_date = data.get('checkout_date')
+    guest_number = int(data.get('guest_number', 2))
+    room_number = int(data.get('room_number', 1))
+    room_type = data.get('room_type')
+    
+    if not all([city, checkin_date, checkout_date]):
+        return jsonify({"error": "Missing required parameters: city, checkin_date, checkout_date"}), 400
     
     # Hämta Booking.com city ID
-    booking_dest_id = get_city_id(search.city)
+    booking_dest_id = get_city_id(city)
     if not booking_dest_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"City '{search.city}' not found in Booking.com database"
-        )
+        return jsonify({"error": f"City '{city}' not found in Booking.com database"}), 404
     
     # Hämta TripAdvisor location ID
-    tripadvisor_location_id = TRIPADVISOR_LOCATIONS.get(search.city.lower())
+    tripadvisor_location_id = TRIPADVISOR_LOCATIONS.get(city.lower())
     
     # Validera rumstyp
-    if search.room_type and search.room_type not in ROOM_TYPE_MAPPING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid room type. Available: {list(ROOM_TYPE_MAPPING.keys())}"
-        )
+    if room_type and room_type not in ROOM_TYPE_MAPPING:
+        return jsonify({"error": f"Invalid room type. Available: {list(ROOM_TYPE_MAPPING.keys())}"}), 400
     
     try:
-        # Parallella API-anrop (asynkront skulle vara bättre)
+        # API-anrop till båda tjänsterna
         booking_data = search_hotels_booking_api(
-            booking_dest_id, search.checkin_date, search.checkout_date,
-            search.guest_number, search.room_number
+            booking_dest_id, checkin_date, checkout_date, guest_number, room_number
         )
         
         tripadvisor_data = None
@@ -486,100 +504,71 @@ def search_hotels(search: HotelSearchRequest):
         
         # Kontrollera Booking.com data
         if not booking_data or 'data' not in booking_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No hotels found from Booking.com"
-            )
+            return jsonify({"error": "No hotels found from Booking.com"}), 404
         
         booking_hotels = booking_data.get('data', [])
         tripadvisor_hotels = tripadvisor_data.get('data', []) if tripadvisor_data else []
         
         if not booking_hotels:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No hotels found for the specified criteria"
-            )
+            return jsonify({"error": "No hotels found for the specified criteria"}), 404
         
         # Bearbeta data från BÅDA källor
         processed_hotels = process_dual_hotel_data(
-            booking_hotels, tripadvisor_hotels, search.city,
-            search.checkin_date, search.checkout_date, 
-            search.guest_number, search.room_number, search.room_type
+            booking_hotels, tripadvisor_hotels, city,
+            checkin_date, checkout_date, guest_number, room_number, room_type
         )
         
         # Skapa response
-        return SearchResponse(
-            city=search.city,
-            hotels=processed_hotels,
-            total_found=len(processed_hotels),
-            search_params={
-                "checkin": search.checkin_date,
-                "checkout": search.checkout_date,
-                "guests": search.guest_number,
-                "rooms": search.room_number
+        return jsonify({
+            "city": city,
+            "hotels": processed_hotels,
+            "total_found": len(processed_hotels),
+            "search_params": {
+                "checkin": checkin_date,
+                "checkout": checkout_date,
+                "guests": guest_number,
+                "rooms": room_number
             },
-            room_filter=search.room_type,
-            data_sources=["Booking.com", "TripAdvisor"]
-        )
+            "room_filter": room_type,
+            "data_sources": ["Booking.com", "TripAdvisor"],
+            "booking_optimization": "enabled",
+            "tripadvisor_integration": "enabled"
+        })
         
-    except requests.exceptions.Timeout:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Hotel search service timeout"
-        )
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API request failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Hotel search service unavailable"
-        )
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return jsonify({"error": f"Service error: {str(e)}"}), 503
 
-@app.get("/room-types")
+@app.route('/room-types', methods=['GET'])
 def get_room_types():
     """Hämta tillgängliga rumstyper"""
-    return {
+    return jsonify({
         "room_types": ROOM_TYPE_MAPPING,
         "available_types": list(ROOM_TYPE_MAPPING.keys())
-    }
+    })
 
-@app.get("/cities")
+@app.route('/cities', methods=['GET'])
 def get_supported_cities():
-    """Hämta alla städer"""
-    csv_file = "cities.csv"
-    
-    if not os.path.exists(csv_file):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Cities database not available"
-        )
-    
+    """Hämta alla städer som stöds"""
     cities = []
-    try:
-        with open(csv_file, newline="", encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                city_key = row["city"].lower()
-                cities.append({
-                    "city": row["city"],
-                    "booking_dest_id": row["dest_id"],
-                    "tripadvisor_location_id": TRIPADVISOR_LOCATIONS.get(city_key),
-                    "country_code": COUNTRY_CODES.get(city_key, "en-gb"),
-                    "both_platforms": city_key in TRIPADVISOR_LOCATIONS
-                })
-    except Exception as e:
-        logger.error(f"Error reading cities: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error reading cities database"
-        )
+    for city_key, tripadvisor_id in TRIPADVISOR_LOCATIONS.items():
+        booking_id = get_city_id(city_key)
+        cities.append({
+            "city": city_key,
+            "booking_dest_id": booking_id,
+            "tripadvisor_location_id": tripadvisor_id,
+            "country_code": COUNTRY_CODES.get(city_key, "en-gb"),
+            "both_platforms": bool(booking_id and tripadvisor_id)
+        })
     
-    return {
+    return jsonify({
         "cities": cities,
         "total": len(cities),
-        "dual_platform_cities": len([c for c in cities if c["both_platforms"]])
-    }
+        "dual_platform_cities": len([c for c in cities if c["both_platforms"]]),
+        "data_sources": ["Booking.com", "TripAdvisor"]
+    })
 
-@app.get("/test")
+@app.route('/test', methods=['GET'])
 def test_dual_integration():
     """Test endpoint för både Booking.com och TripAdvisor"""
     try:
@@ -596,42 +585,43 @@ def test_dual_integration():
                 "stockholm", "2025-07-20", "2025-07-22", 2, 1
             )
             
-            return {
+            return jsonify({
                 "status": "success",
                 "test_city": "Stockholm",
                 "booking_hotels_found": len(booking_hotels),
                 "tripadvisor_hotels_found": len(tripadvisor_hotels),
                 "sample_hotels": processed,
-                "data_sources": ["Booking.com", "TripAdvisor"]
-            }
+                "data_sources": ["Booking.com", "TripAdvisor"],
+                "api_keys_working": True
+            })
         else:
-            return {
+            return jsonify({
                 "status": "error",
-                "message": "No Booking.com data found"
-            }
+                "message": "No Booking.com data found",
+                "booking_response": booking_data,
+                "tripadvisor_response": tripadvisor_data
+            })
             
     except Exception as e:
         logger.error(f"Test endpoint error: {e}")
-        return {
+        return jsonify({
             "status": "error", 
             "message": str(e)
-        }
+        })
 
-# Exception handlers
-@app.exception_handler(ValueError)
-async def value_error_handler(request, exc):
-    return JSONResponse(
-        status_code=400,
-        content={"detail": str(exc)}
-    )
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
 
 # Development server
 if __name__ == "__main__":
-    logger.info("Starting STAYFINDR Backend API v2.0 - Dual Platform Edition")
+    logger.info("Starting STAYFINDR Backend API v2.0 - Flask Dual Platform Edition")
     logger.info("Supporting BOTH Booking.com AND TripAdvisor integration")
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=True
-    )
+    
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
