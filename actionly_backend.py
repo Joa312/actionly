@@ -1,5 +1,5 @@
-# STAYFINDR BACKEND v6.4 - Data Cleaning & Final Polish
-# Automatically cleans city names from CSV to remove extra quotes and whitespace.
+# STAYFINDR BACKEND v6.5 - Coordinate-Based Search
+# FIX: Switched from text/ID-based search to coordinate-based search to prevent location mismatches.
 
 import os
 import logging
@@ -55,7 +55,6 @@ def load_cities_from_csv(filename='cities.csv'):
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
-            # Use Sniffer to automatically detect CSV format (comma vs semicolon).
             try:
                 dialect = csv.Sniffer().sniff(infile.read(1024))
                 infile.seek(0) 
@@ -83,16 +82,13 @@ def load_cities_from_csv(filename='cities.csv'):
                 except (ValueError, TypeError):
                     logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}. Using default (0,0).")
                 
-                # REVISION: Clean the city name to remove extra quotes and whitespace.
                 raw_name = row.get('name', 'N/A')
                 cleaned_name = raw_name.replace('"', '').strip()
 
                 cities[key] = {
                     'name': cleaned_name,
                     'coordinates': [lat, lon],
-                    'search_query': row.get('search_query', ''),
                     'country': row.get('country', ''),
-                    'tripadvisor_id': row.get('tripadvisor_id', '')
                 }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
@@ -108,45 +104,55 @@ CITIES = load_cities_from_csv('cities.csv')
 
 # --- External API Functions with Caching ---
 
+# KORRIGERING: Helt ny funktion som söker med koordinater istället för text/ID.
 @cache
-def get_booking_location_id(city_query):
-    if not city_query: return None
-    url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
-    try:
-        response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params={"query": city_query}, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('data'):
-            return data['data'][0].get('id')
-    except RequestException as e:
-        logging.error(f"Booking.com location ID request failed: {e}")
-    return None
-
-@cache
-def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
-    url = f"https://{BOOKING_API_HOST}/stays/search"
-    params = {"locationId": location_id, "checkinDate": checkin, "checkoutDate": checkout, "adults": adults, "rooms": rooms, "currency": "EUR"}
+def search_booking_hotels_by_coords(latitude, longitude, checkin, checkout, adults, rooms):
+    """
+    Searches for hotels on Booking.com using geographic coordinates.
+    """
+    url = f"https://{BOOKING_API_HOST}/stays/search-by-coordinates"
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "checkinDate": checkin,
+        "checkoutDate": checkout,
+        "adults": adults,
+        "rooms": rooms,
+        "currency": "EUR"
+    }
     try:
         response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=15)
         response.raise_for_status()
         return response.json()
     except RequestException as e:
-        logging.error(f"Booking.com search request failed: {e}")
+        logging.error(f"Booking.com search by coordinates request failed: {e}")
     return None
 
+# KORRIGERING: Helt ny funktion som söker med koordinater istället för GeoID.
 @cache
-def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
-    if not geo_id: return None
-    url = f"https://{TRIPADVISOR_API_HOST}/api/v1/hotels/searchHotels"
-    params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
+def search_tripadvisor_hotels_by_coords(latitude, longitude, checkin, checkout, adults):
+    """
+    Searches for hotels on TripAdvisor.com using geographic coordinates.
+    """
+    url = f"https://{TRIPADVISOR_API_HOST}/api/v1/hotels/searchHotelsByCoordinates"
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "checkIn": checkin,
+        "checkOut": checkout,
+        "adults": adults,
+        "rooms": "1",
+        "currencyCode": "EUR"
+    }
     try:
         response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
         return data.get('data', {}).get('data', [])
     except RequestException as e:
-        logging.error(f"TripAdvisor search request failed: {e}")
+        logging.error(f"TripAdvisor search by coordinates request failed: {e}")
     return []
+
 
 # --- Data Processing Functions ---
 
@@ -231,8 +237,7 @@ def get_demo_hotels(city_info, room_type, source):
     ]
     processed_demos = []
     for i, demo in enumerate(demo_templates):
-        base_lat = city_info['coordinates'][0]
-        base_lon = city_info['coordinates'][1]
+        base_lat, base_lon = city_info['coordinates']
         offset = i * 0.01 - 0.01
         
         demo_hotel = {
@@ -269,19 +274,18 @@ def handle_hotel_search(source):
 
     try:
         api_data = None
+        # KORRIGERING: Använder stadens koordinater för sökningen
+        lat, lon = city_info['coordinates']
+
         if source == 'booking':
-            location_id = get_booking_location_id(city_info['search_query'])
-            if location_id:
-                api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
-                if api_data:
-                    processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
+            api_data = search_booking_hotels_by_coords(lat, lon, params['checkin'], params['checkout'], params['adults'], params['rooms'])
+            if api_data:
+                processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
         
         elif source == 'tripadvisor':
-            geo_id = city_info.get('tripadvisor_id')
-            if geo_id:
-                api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
-                if api_data:
-                    processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
+            api_data = search_tripadvisor_hotels_by_coords(lat, lon, params['checkin'], params['checkout'], params['adults'])
+            if api_data:
+                processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
 
         if not processed_hotels:
             data_source = 'demo_fallback'
@@ -303,7 +307,7 @@ def handle_hotel_search(source):
 # --- Flask Routes ---
 @app.route('/')
 def home():
-    return render_template_string('<h1>STAYFINDR Backend v6.4</h1><p>City data is now loaded from cities.csv</p>')
+    return render_template_string('<h1>STAYFINDR Backend v6.5</h1><p>Now using coordinate-based search.</p>')
 
 @app.route('/api/cities')
 def get_cities_route():
@@ -327,12 +331,12 @@ def get_hotels_legacy_route():
 
 @app.route('/test')
 def test_endpoint_route():
-    return jsonify({'status': 'STAYFINDR Backend v6.4 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
+    return jsonify({'status': 'STAYFINDR Backend v6.5 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v6.4...")
-    logging.info("▶️ Now loading city data from cities.csv.")
+    logging.info("🚀 Starting STAYFINDR Backend v6.5...")
+    logging.info("▶️ Now loading city data from cities.csv and using coordinate-based search.")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
