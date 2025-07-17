@@ -1,7 +1,8 @@
-# STAYFINDR BACKEND v7.5 - Fully Dynamic Search
-# FINAL FIX: Re-implemented dynamic Geo ID lookup for TripAdvisor.
-# The system now dynamically fetches location IDs for BOTH Booking.com and TripAdvisor before every search.
-# This removes all reliance on static, potentially outdated IDs from the CSV file.
+# STAYFINDR BACKEND v7.7 - Final Stable Version
+# FINAL FIX: Reverted all API calls to the original, user-confirmed working endpoints.
+# This version uses the initial, stable logic of fetching IDs from the CSV and text queries,
+# but retains all the robust error handling and crash-proofing developed in later versions.
+# This should be the definitive, working solution based on the user's API subscriptions.
 
 import os
 import logging
@@ -9,8 +10,6 @@ from datetime import datetime, timedelta
 from urllib.parse import quote_plus
 import re
 import csv
-import json
-import base64
 
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
@@ -28,8 +27,7 @@ if not RAPIDAPI_KEY:
 CORS(app, origins=["https://joa312.github.io", "http://127.0.0.1:5500", "http://localhost:3000", "http://127.0.0.1:5000"])
 
 # --- API & Data Constants ---
-BOOKING_V1_API_HOST = "booking-com.p.rapidapi.com"
-BOOKING_STAYS_API_HOST = "booking-com18.p.rapidapi.com"
+BOOKING_API_HOST = "booking-com18.p.rapidapi.com"
 TRIPADVISOR_API_HOST = "tripadvisor-com1.p.rapidapi.com"
 BOOKING_HOTEL_LIMIT = 20
 TRIPADVISOR_HOTEL_LIMIT = 15
@@ -37,7 +35,7 @@ URL_REGEX = re.compile(r'\d+')
 
 # --- Data Loading ---
 def load_cities_from_csv(filename='cities.csv'):
-    """Loads cities from CSV. Only 'key' and 'name' are now required."""
+    """Loads cities from CSV. `search_query` and `tripadvisor_id` are now used again."""
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
@@ -47,7 +45,11 @@ def load_cities_from_csv(filename='cities.csv'):
                 if not key:
                     logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
                     continue
-                cities[key] = {'name': row.get('name', 'N/A').replace('"', '').strip()}
+                cities[key] = {
+                    'name': row.get('name', 'N/A').replace('"', '').strip(),
+                    'search_query': row.get('search_query', ''),
+                    'tripadvisor_id': row.get('tripadvisor_id', '')
+                }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
     except FileNotFoundError:
@@ -61,64 +63,45 @@ CITIES = load_cities_from_csv('cities.csv')
 
 # --- External API Functions ---
 
-def get_booking_location_details(city_name):
-    """Step 1 (Booking): Get destination details from the v1 API."""
-    url = f"https://{BOOKING_V1_API_HOST}/v1/hotels/locations"
-    params = {"name": city_name, "locale": "en-gb"}
-    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_V1_API_HOST}, params=params, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-    if data and isinstance(data, list):
-        for item in data:
-            if item.get('dest_id'):
-                details = {"city_name": item.get("city_name", item.get("name")), "country": item.get("country"), "dest_id": item.get("dest_id"), "dest_type": item.get("dest_type")}
-                logging.info(f"Found Booking.com location details for {city_name}: {details}")
-                return details
-    logging.warning(f"Could not find Booking.com location details for city: {city_name}")
-    return None
-
-def create_booking_location_id(location_details):
-    """Step 2 (Booking): Create the special base64-encoded locationId."""
-    json_string = json.dumps(location_details, separators=(',', ':'))
-    return base64.b64encode(json_string.encode('utf-8')).decode('utf-8')
-
-def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
-    """Step 3 (Booking): Search hotels using the generated location ID."""
-    url = f"https://{BOOKING_STAYS_API_HOST}/stays/search"
-    params = {"locationId": location_id, "checkinDate": checkin, "checkoutDate": checkout, "adults": adults, "rooms": rooms, "currency": "EUR"}
-    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_STAYS_API_HOST}, params=params, timeout=15)
-    response.raise_for_status()
-    return response.json()
-
-def get_tripadvisor_geo_id(city_name):
-    """Step 1 (TripAdvisor): Dynamically fetches the Geo ID."""
-    url = f"https://{TRIPADVISOR_API_HOST}/locations/search"
-    params = {"query": city_name, "lang": "en_US", "units": "km"}
-    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
+def get_booking_location_id(city_query):
+    """Fetches location ID from the original booking-com18 endpoint."""
+    if not city_query: return None
+    url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
+    params = {"query": city_query}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=10)
     response.raise_for_status()
     data = response.json()
     if data.get('data'):
-        for item in data['data']:
-            if item.get('result_type') == 'geography':
-                if geo_id := item.get('result_object', {}).get('location_id'):
-                    logging.info(f"Found TripAdvisor geoId: {geo_id} for city: {city_name}")
-                    return geo_id
-    logging.warning(f"Could not find TripAdvisor geoId for city: {city_name}")
+        return data['data'][0].get('id')
+    logging.warning(f"Could not find Booking.com location ID for query: {city_query}")
     return None
 
+def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
+    """Searches Booking.com hotels using a location ID."""
+    url = f"https://{BOOKING_API_HOST}/stays/search"
+    params = {"locationId": location_id, "checkinDate": checkin, "checkoutDate": checkout, "adults": adults, "rooms": rooms, "currency": "EUR"}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
 def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
-    """Step 2 (TripAdvisor): Searches hotels using a Geo ID."""
+    """Searches TripAdvisor hotels using a Geo ID."""
+    if not geo_id: return None
     url = f"https://{TRIPADVISOR_API_HOST}/hotels/search"
     params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
     response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
     response.raise_for_status()
-    data = response.json()
-    return data.get('data', [])
+    return response.json()
 
 # --- Data Processing Functions ---
 
-def process_booking_hotels(hotels_data, search_params):
+def process_booking_hotels(api_data, search_params):
     processed = []
+    hotels_data = api_data.get('data', [])
+    if not isinstance(hotels_data, list):
+        logging.warning(f"Booking.com data processing received non-list data: {type(hotels_data)}")
+        return []
+
     for i, hotel in enumerate(hotels_data[:BOOKING_HOTEL_LIMIT]):
         price = 'N/A'
         if price_info := hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value'):
@@ -133,9 +116,13 @@ def process_booking_hotels(hotels_data, search_params):
         })
     return processed
 
-def process_tripadvisor_hotels(hotels_data):
+def process_tripadvisor_hotels(api_data):
     processed = []
-    if not isinstance(hotels_data, list): return []
+    hotels_data = api_data.get('data', [])
+    if not isinstance(hotels_data, list):
+        logging.warning(f"TripAdvisor API did not return a list of hotels.")
+        return []
+
     for i, hotel in enumerate(hotels_data[:TRIPADVISOR_HOTEL_LIMIT]):
         price = 'N/A'
         if price_str := hotel.get('priceForDisplay'):
@@ -157,22 +144,27 @@ def handle_hotel_search(source):
     today = datetime.now()
     params = {'city_key': request.args.get('city', 'stockholm').lower(), 'checkin': request.args.get('checkin', (today + timedelta(days=1)).strftime('%Y-%m-%d')), 'checkout': request.args.get('checkout', (today + timedelta(days=2)).strftime('%Y-%m-%d')), 'adults': request.args.get('adults', '2'), 'rooms': request.args.get('rooms', '1')}
     if params['city_key'] not in CITIES: return jsonify({'error': f"City '{params['city_key']}' not supported"}), 400
-    city_name = CITIES[params['city_key']]['name']
+    
+    city_info = CITIES[params['city_key']]
+    city_name = city_info['name']
     
     try:
         logging.info(f"Handling '{source}' search for '{city_name}'.")
         if source == 'booking':
-            location_details = get_booking_location_details(city_name)
-            if not location_details: return jsonify({'error': f"Kunde inte hitta platsinformation för '{city_name}' på Booking.com."}), 404
-            location_id = create_booking_location_id(location_details)
-            api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
-            processed_hotels = process_booking_hotels(api_data.get('data', []), params)
+            location_id = get_booking_location_id(city_info['search_query'])
+            if location_id:
+                api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
+                processed_hotels = process_booking_hotels(api_data, params)
+            else:
+                return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på Booking.com."}), 404
 
         elif source == 'tripadvisor':
-            geo_id = get_tripadvisor_geo_id(city_name)
-            if not geo_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
-            api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
-            processed_hotels = process_tripadvisor_hotels(api_data)
+            geo_id = city_info.get('tripadvisor_id')
+            if geo_id:
+                api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
+                processed_hotels = process_tripadvisor_hotels(api_data)
+            else:
+                return jsonify({'error': f"Inget TripAdvisor ID hittades för '{city_name}' i din CSV-fil."}), 404
         else:
             return jsonify({'error': f"Source '{source}' is not supported."}), 400
         
@@ -188,7 +180,7 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v7.5</h1><p>Fully dynamic ID lookup for all services.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v7.7</h1><p>Stable version using confirmed API endpoints.</p>')
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
 @app.route('/api/hotels/booking')
@@ -196,11 +188,11 @@ def get_booking_hotels_route(): return handle_hotel_search(source='booking')
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v7.5 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v7.7 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v7.5...")
+    logging.info("🚀 Starting STAYFINDR Backend v7.7...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
