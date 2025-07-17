@@ -1,12 +1,12 @@
-# STAYFINDR BACKEND v6.6 - API Call Fix
-# FIX: Corrected a logic error where the wrong search function was being called.
-# FIX: Added more specific logging to aid in future debugging.
+# STAYFINDR BACKEND v6.7 - Robust Error Handling & Cache Removal
+# FIX: Removed @cache from API calls to ensure fresh data and prevent caching of failed requests.
+# FIX: Rewrote search handler to provide clear error messages instead of silently falling back to demo data.
+# FIX: This version correctly distinguishes between a failed API call and a successful call that returns zero results.
 
 import os
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, quote_plus
-from functools import cache
 import re
 import csv
 
@@ -50,9 +50,6 @@ ROOM_TYPES = {
 
 # Function to load cities from the CSV file
 def load_cities_from_csv(filename='cities.csv'):
-    """
-    Loads city data from a CSV file, automatically detecting the delimiter and cleaning the data.
-    """
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
@@ -66,145 +63,93 @@ def load_cities_from_csv(filename='cities.csv'):
                 reader = csv.DictReader(infile)
 
             for i, row in enumerate(reader):
-                if not any(row.values()):
-                    continue
-                
+                if not any(row.values()): continue
                 key = row.get('key')
                 if not key:
                     logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
                     continue
-
                 lat, lon = 0.0, 0.0
                 try:
-                    lat_str = row.get('lat', '0').replace(',', '.')
-                    lon_str = row.get('lon', '0').replace(',', '.')
-                    lat = float(lat_str)
-                    lon = float(lon_str)
+                    lat = float(row.get('lat', '0').replace(',', '.'))
+                    lon = float(row.get('lon', '0').replace(',', '.'))
                 except (ValueError, TypeError):
-                    logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}. Using default (0,0).")
+                    logging.warning(f"Could not parse coordinates for city '{key}' on row {i+2}.")
                 
-                raw_name = row.get('name', 'N/A')
-                cleaned_name = raw_name.replace('"', '').strip()
-
                 cities[key] = {
-                    'name': cleaned_name,
+                    'name': row.get('name', 'N/A').replace('"', '').strip(),
                     'coordinates': [lat, lon],
                     'country': row.get('country', ''),
                 }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
     except FileNotFoundError:
-        logging.error(f"CRITICAL: The file {filename} was not found. The application cannot start without it.")
+        logging.error(f"CRITICAL: The file {filename} was not found.")
         raise
     except Exception as e:
         logging.error(f"CRITICAL: Failed to read or parse {filename}. Error: {e}", exc_info=True)
         raise
 
-# The CITIES dictionary is now loaded from the CSV file at startup.
 CITIES = load_cities_from_csv('cities.csv')
 
-# --- External API Functions with Caching ---
+# --- External API Functions ---
+# FIX: Removed @cache decorator to prevent caching failed requests.
 
-@cache
 def search_booking_hotels_by_coords(latitude, longitude, checkin, checkout, adults, rooms):
-    """
-    Searches for hotels on Booking.com using geographic coordinates.
-    """
     url = f"https://{BOOKING_API_HOST}/stays/search-by-coordinates"
     params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "checkinDate": checkin,
-        "checkoutDate": checkout,
-        "adults": adults,
-        "rooms": rooms,
-        "currency": "EUR"
+        "latitude": latitude, "longitude": longitude, "checkinDate": checkin,
+        "checkoutDate": checkout, "adults": adults, "rooms": rooms, "currency": "EUR"
     }
-    try:
-        response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=15)
-        response.raise_for_status()
-        return response.json()
-    except RequestException as e:
-        logging.error(f"Booking.com search by coordinates request failed: {e}")
-    return None
+    # The try/except block is now in the main handler for better error propagation.
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=15)
+    response.raise_for_status()  # Will raise an exception for non-2xx responses
+    return response.json()
 
-@cache
 def search_tripadvisor_hotels_by_coords(latitude, longitude, checkin, checkout, adults):
-    """
-    Searches for hotels on TripAdvisor.com using geographic coordinates.
-    """
     url = f"https://{TRIPADVISOR_API_HOST}/api/v1/hotels/searchHotelsByCoordinates"
     params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "checkIn": checkin,
-        "checkOut": checkout,
-        "adults": adults,
-        "rooms": "1",
-        "currencyCode": "EUR"
+        "latitude": latitude, "longitude": longitude, "checkIn": checkin,
+        "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"
     }
-    try:
-        response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        return data.get('data', {}).get('data', [])
-    except RequestException as e:
-        logging.error(f"TripAdvisor search by coordinates request failed: {e}")
-    return []
-
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    return data.get('data', {}).get('data', [])
 
 # --- Data Processing Functions ---
 
 def process_booking_hotels(hotels_data, city_info, search_params):
     processed = []
-    hotels_to_process = hotels_data[:BOOKING_HOTEL_LIMIT]
-    for i, hotel in enumerate(hotels_to_process):
+    for i, hotel in enumerate(hotels_data[:BOOKING_HOTEL_LIMIT]):
         price = 'N/A'
-        price_info = hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value')
-        
-        if price_info:
+        if price_info := hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value'):
             nights = (datetime.strptime(search_params['checkout'], '%Y-%m-%d') - datetime.strptime(search_params['checkin'], '%Y-%m-%d')).days
-            if nights > 0:
-                price = int(price_info / nights)
-            else:
-                price = int(price_info)
+            price = int(price_info / nights) if nights > 0 else int(price_info)
         
         rating = hotel.get('reviewScore', 0.0)
-        rating = round(float(rating) / 2, 1) if rating > 5 else round(float(rating), 1)
-
         processed.append({
-            'id': hotel.get('id') or f"booking_{i}",
-            'name': hotel.get('name', 'Unknown Hotel'),
-            'address': hotel.get('address', city_info['name']),
-            'coordinates': [float(hotel.get('latitude', city_info['coordinates'][0])), float(hotel.get('longitude', city_info['coordinates'][1]))],
-            'price': price,
-            'rating': rating or 4.0,
-            'source': 'booking.com',
-            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'id': hotel.get('id') or f"booking_{i}", 'name': hotel.get('name', 'Unknown Hotel'),
+            'address': hotel.get('address', city_info['name']), 'phone': hotel.get('phone', None),
+            'coordinates': [float(hotel.get('latitude', 0)), float(hotel.get('longitude', 0))],
+            'price': price, 'rating': round(float(rating) / 2, 1) if rating > 5 else round(float(rating), 1),
+            'source': 'booking.com', 'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
             'booking_url': create_booking_url(hotel, city_info, search_params)
         })
     return processed
 
 def process_tripadvisor_hotels(hotels_data, city_info, search_params):
     processed = []
-    hotels_to_process = hotels_data[:TRIPADVISOR_HOTEL_LIMIT]
-    for i, hotel in enumerate(hotels_to_process):
+    for i, hotel in enumerate(hotels_data[:TRIPADVISOR_HOTEL_LIMIT]):
         price = 'N/A'
-        price_str = hotel.get('priceForDisplay')
-        if price_str:
-            numbers = URL_REGEX.findall(price_str.replace(',', ''))
-            if numbers:
+        if price_str := hotel.get('priceForDisplay'):
+            if numbers := URL_REGEX.findall(price_str.replace(',', '')):
                 price = int(numbers[0])
-
         processed.append({
-            'id': hotel.get('id') or f"tripadvisor_{i}",
-            'name': hotel.get('title', 'Unknown Hotel'),
-            'address': city_info['name'],
-            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', city_info['coordinates'][0])), float(hotel.get('geoSummary', {}).get('longitude', city_info['coordinates'][1]))],
-            'price': price,
-            'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
-            'source': 'tripadvisor',
-            'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
+            'id': hotel.get('id') or f"tripadvisor_{i}", 'name': hotel.get('title', 'Unknown Hotel'),
+            'address': city_info['name'], 'phone': hotel.get('phone', None),
+            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', 0)), float(hotel.get('geoSummary', {}).get('longitude', 0))],
+            'price': price, 'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
+            'source': 'tripadvisor', 'room_type': ROOM_TYPES.get(search_params['room_type'], {}).get('name'),
             'booking_url': f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
         })
     return processed
@@ -212,43 +157,10 @@ def process_tripadvisor_hotels(hotels_data, city_info, search_params):
 # --- URL & Fallback Generators ---
 
 def create_booking_url(hotel, city_info, params):
-    country_code_map = {
-        'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es',
-        'it': 'it', 'de': 'de', 'nl': 'nl'
-    }
+    country_code_map = {'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es', 'it': 'it', 'de': 'de', 'nl': 'nl'}
     domain_suffix = country_code_map.get(city_info['country'], city_info['country']) + '.html'
-    
-    base_params = {
-        'ss': hotel.get('name', 'Hotel'),
-        'checkin': params['checkin'],
-        'checkout': params['checkout'],
-        **ROOM_TYPES.get(params['room_type'], {}).get('booking_params', {})
-    }
-    query_string = urlencode(base_params)
-    return f"https://www.booking.com/searchresults.{domain_suffix}?{query_string}"
-
-def get_demo_hotels(city_info, room_type, source):
-    logging.warning(f"Using fallback DEMO data for {city_info['name']} from {source}.")
-    demo_templates = [
-        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 250, 'rating': 4.5},
-        {'name': f'Central Plaza {city_info["name"].split(",")[0]}', 'price': 150, 'rating': 4.1},
-        {'name': f'Riverside Inn {city_info["name"].split(",")[0]}', 'price': 120, 'rating': 3.9}
-    ]
-    processed_demos = []
-    for i, demo in enumerate(demo_templates):
-        base_lat, base_lon = city_info['coordinates']
-        offset = i * 0.01 - 0.01
-        
-        demo_hotel = {
-            'id': f"demo_{source}_{i}", 'name': demo['name'], 'address': city_info['name'],
-            'coordinates': [base_lat + offset, base_lon + offset],
-            'price': demo['price'], 'rating': demo['rating'], 'source': source,
-            'room_type': ROOM_TYPES.get(room_type, {}).get('name'),
-            'booking_url': f"https://www.{source.split('.')[0]}.com/"
-        }
-        processed_demos.append(demo_hotel)
-        
-    return processed_demos
+    base_params = {'ss': hotel.get('name', 'Hotel'), 'checkin': params['checkin'], 'checkout': params['checkout'], **ROOM_TYPES.get(params['room_type'], {}).get('booking_params', {})}
+    return f"https://www.booking.com/searchresults.{domain_suffix}?{urlencode(base_params)}"
 
 # --- Unified API Route Handler ---
 
@@ -268,55 +180,47 @@ def handle_hotel_search(source):
         return jsonify({'error': f"Room type '{params['room_type']}' not supported"}), 400
 
     city_info = CITIES[params['city']]
+    lat, lon = city_info['coordinates']
     processed_hotels = []
     data_source = 'live_api'
 
     try:
-        api_data = None
-        lat, lon = city_info['coordinates']
-        
-        logging.info(f"Handling hotel search for source: '{source}' in city: '{city_info['name']}'")
-
-        # KORRIGERING: Säkerställer att rätt API-funktion anropas för rätt källa.
+        logging.info(f"Attempting to fetch hotels from '{source}' for '{city_info['name']}'.")
         if source == 'booking':
-            logging.info("Calling Booking.com API with coordinates.")
             api_data = search_booking_hotels_by_coords(lat, lon, params['checkin'], params['checkout'], params['adults'], params['rooms'])
-            if api_data:
-                logging.info("Processing Booking.com results.")
-                processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
-        
+            processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
         elif source == 'tripadvisor':
-            logging.info("Calling TripAdvisor API with coordinates.")
             api_data = search_tripadvisor_hotels_by_coords(lat, lon, params['checkin'], params['checkout'], params['adults'])
-            if api_data:
-                logging.info("Processing TripAdvisor results.")
-                processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
-        
+            processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
         else:
-            logging.error(f"Unknown source '{source}' provided to handle_hotel_search.")
             return jsonify({'error': f"Source '{source}' is not supported."}), 400
-
+        
         if not processed_hotels:
-            data_source = 'demo_fallback'
-            processed_hotels = get_demo_hotels(city_info, params['room_type'], source)
+            logging.warning(f"Live API call to '{source}' was successful but returned 0 hotels.")
+            data_source = 'live_api_empty'
 
-        return jsonify({
-            'city': city_info['name'],
-            'hotels': processed_hotels,
-            'total_found': len(processed_hotels),
-            'search_params': params,
-            'source': source,
-            'data_source': data_source
-        })
-
+    except RequestException as e:
+        # FIX: Catch API errors explicitly and return a clear error message to the frontend.
+        logging.error(f"API call to '{source}' failed: {e}")
+        error_message = f"Kunde inte hämta data från {source.capitalize()}. Tjänsten kan vara nere, eller så kan din API-nyckel ha gått ut."
+        return jsonify({'error': error_message}), 503 # 503 Service Unavailable is appropriate here
     except Exception as e:
-        logging.critical(f"Unhandled exception in handle_hotel_search for source '{source}': {e}", exc_info=True)
-        return jsonify({'error': 'An unexpected internal server error occurred.'}), 500
+        logging.critical(f"An unhandled exception occurred for source '{source}': {e}", exc_info=True)
+        return jsonify({'error': 'Ett oväntat internt fel uppstod.'}), 500
+
+    return jsonify({
+        'city': city_info['name'],
+        'hotels': processed_hotels,
+        'total_found': len(processed_hotels),
+        'search_params': params,
+        'source': source,
+        'data_source': data_source
+    })
 
 # --- Flask Routes ---
 @app.route('/')
 def home():
-    return render_template_string('<h1>STAYFINDR Backend v6.6</h1><p>API call logic corrected. Using coordinate-based search.</p>')
+    return render_template_string('<h1>STAYFINDR Backend v6.7</h1><p>Robust error handling implemented. No more silent fallbacks.</p>')
 
 @app.route('/api/cities')
 def get_cities_route():
@@ -334,18 +238,13 @@ def get_booking_hotels_route():
 def get_tripadvisor_hotels_route():
     return handle_hotel_search(source='tripadvisor')
 
-@app.route('/api/hotels')
-def get_hotels_legacy_route():
-    return handle_hotel_search(source='booking')
-
 @app.route('/test')
 def test_endpoint_route():
-    return jsonify({'status': 'STAYFINDR Backend v6.6 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
+    return jsonify({'status': 'STAYFINDR Backend v6.7 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v6.6...")
-    logging.info("▶️ Now loading city data from cities.csv and using coordinate-based search.")
+    logging.info("🚀 Starting STAYFINDR Backend v6.7...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
