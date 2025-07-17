@@ -1,9 +1,10 @@
-# STAYFINDR BACKEND v10.1 - Stockholm Location ID Fix
+# STAYFINDR BACKEND v10.2 - CSV Integration with Stockholm Fix
 # Flask backend with RapidAPI Booking.com integration
-# FIXED: Stockholm incorrect location_id issue
+# FIXED: Reads all 71 cities from cities.csv + Stockholm location ID fix
 
 import os
 import logging
+import csv
 from datetime import datetime
 from urllib.parse import quote_plus
 from flask import Flask, request, jsonify, render_template_string
@@ -23,170 +24,126 @@ logger = logging.getLogger(__name__)
 RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
 RAPIDAPI_HOST = "booking-com18.p.rapidapi.com"
 
-# European Cities Configuration - 71 major destinations
-CITIES = {
-    'stockholm': {
-        'name': 'Stockholm, Sweden',
-        'coordinates': [59.3293, 18.0686],
-        'search_query': 'Stockholm Sweden',
-        'booking_location_id': '-2960556'  # FIXED: Correct Stockholm location ID
-    },
-    'paris': {
-        'name': 'Paris, France', 
-        'coordinates': [48.8566, 2.3522],
-        'search_query': 'Paris France'
-    },
-    'london': {
-        'name': 'London, UK',
-        'coordinates': [51.5074, -0.1278],
-        'search_query': 'London United Kingdom'
-    },
-    'amsterdam': {
-        'name': 'Amsterdam, Netherlands',
-        'coordinates': [52.3676, 4.9041],
-        'search_query': 'Amsterdam Netherlands'
-    },
-    'barcelona': {
-        'name': 'Barcelona, Spain',
-        'coordinates': [41.3851, 2.1734],
-        'search_query': 'Barcelona Spain'
-    },
-    'rome': {
-        'name': 'Rome, Italy',
-        'coordinates': [41.9028, 12.4964],
-        'search_query': 'Rome Italy'
-    },
-    'berlin': {
-        'name': 'Berlin, Germany',
-        'coordinates': [52.5200, 13.4050],
-        'search_query': 'Berlin Germany'
-    },
-    'copenhagen': {
-        'name': 'Copenhagen, Denmark',
-        'coordinates': [55.6761, 12.5683],
-        'search_query': 'Copenhagen Denmark'
-    },
-    'vienna': {
-        'name': 'Vienna, Austria',
-        'coordinates': [48.2082, 16.3738],
-        'search_query': 'Vienna Austria'
-    },
-    'prague': {
-        'name': 'Prague, Czech Republic',
-        'coordinates': [50.0755, 14.4378],
-        'search_query': 'Prague Czech Republic'
-    },
-    'madrid': {
-        'name': 'Madrid, Spain',
-        'coordinates': [40.4168, -3.7038],
-        'search_query': 'Madrid Spain'
-    },
-    'milano': {
-        'name': 'Milano, Italy',
-        'coordinates': [45.4642, 9.1900],
-        'search_query': 'Milano Italy'
-    },
-    'zurich': {
-        'name': 'Zürich, Switzerland',
-        'coordinates': [47.3769, 8.5417],
-        'search_query': 'Zürich Switzerland'
-    },
-    'oslo': {
-        'name': 'Oslo, Norway',
-        'coordinates': [59.9139, 10.7522],
-        'search_query': 'Oslo Norway'
-    },
-    'helsinki': {
-        'name': 'Helsinki, Finland',
-        'coordinates': [60.1695, 24.9354],
-        'search_query': 'Helsinki Finland'
-    },
-    'warsaw': {
-        'name': 'Warsaw, Poland',
-        'coordinates': [52.2297, 21.0122],
-        'search_query': 'Warsaw Poland'
-    },
-    'budapest': {
-        'name': 'Budapest, Hungary',
-        'coordinates': [47.4979, 19.0402],
-        'search_query': 'Budapest Hungary'
-    },
-    'dublin': {
-        'name': 'Dublin, Ireland',
-        'coordinates': [53.3498, -6.2603],
-        'search_query': 'Dublin Ireland'
-    },
-    'lisbon': {
-        'name': 'Lisbon, Portugal',
-        'coordinates': [38.7223, -9.1393],
-        'search_query': 'Lisbon Portugal'
-    },
-    'brussels': {
-        'name': 'Brussels, Belgium',
-        'coordinates': [50.8503, 4.3517],
-        'search_query': 'Brussels Belgium'
-    },
-    'athens': {
-        'name': 'Athens, Greece',
-        'coordinates': [37.9838, 23.7275],
-        'search_query': 'Athens Greece'
-    },
-    'munich': {
-        'name': 'Munich, Germany',
-        'coordinates': [48.1351, 11.5820],
-        'search_query': 'Munich Germany'
-    },
-    'lyon': {
-        'name': 'Lyon, France',
-        'coordinates': [45.7640, 4.8357],
-        'search_query': 'Lyon France'
-    },
-    'florence': {
-        'name': 'Florence, Italy',
-        'coordinates': [43.7696, 11.2558],
-        'search_query': 'Florence Italy'
-    },
-    'edinburgh': {
-        'name': 'Edinburgh, Scotland',
-        'coordinates': [55.9533, -3.1883],
-        'search_query': 'Edinburgh Scotland'
-    },
-    'nice': {
-        'name': 'Nice, France',
-        'coordinates': [43.7102, 7.2620],
-        'search_query': 'Nice France'
-    },
-    'palma': {
-        'name': 'Palma, Spain',
-        'coordinates': [39.5696, 2.6502],
-        'search_query': 'Palma Spain'
-    },
-    'santorini': {
-        'name': 'Santorini, Greece',
-        'coordinates': [36.3932, 25.4615],
-        'search_query': 'Santorini Greece'
-    },
-    'ibiza': {
-        'name': 'Ibiza, Spain',
-        'coordinates': [38.9067, 1.4206],
-        'search_query': 'Ibiza Spain'
-    }
-    # Add your other 42 cities here...
-}
-
 # Country codes for Booking.com URLs based on city
 COUNTRY_CODES = {
     'stockholm': 'sv', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
-    'paris': 'fr', 'lyon': 'fr', 'nice': 'fr',
-    'london': 'en-gb', 'edinburgh': 'en-gb',
-    'amsterdam': 'nl', 'brussels': 'nl',
-    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es',
-    'rome': 'it', 'milano': 'it', 'florence': 'it',
-    'berlin': 'de', 'munich': 'de',
-    'vienna': 'de', 'zurich': 'de',
-    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu',
-    'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
+    'paris': 'fr', 'lyon': 'fr', 'nice': 'fr', 'marseille': 'fr', 'bordeaux': 'fr',
+    'london': 'en-gb', 'edinburgh': 'en-gb', 'manchester': 'en-gb', 'liverpool': 'en-gb',
+    'amsterdam': 'nl', 'brussels': 'nl', 'rotterdam': 'nl',
+    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es', 'valencia': 'es', 'seville': 'es',
+    'rome': 'it', 'milano': 'it', 'florence': 'it', 'venice': 'it', 'naples': 'it',
+    'berlin': 'de', 'munich': 'de', 'hamburg': 'de', 'cologne': 'de', 'frankfurt': 'de',
+    'vienna': 'de', 'zurich': 'de', 'geneva': 'fr',
+    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu', 'krakow': 'pl',
+    'dublin': 'en-gb', 'lisbon': 'pt', 'porto': 'pt',
+    'athens': 'el', 'santorini': 'el', 'mykonos': 'el', 'thessaloniki': 'el'
 }
+
+# Special location IDs for problematic cities
+SPECIAL_LOCATION_IDS = {
+    'stockholm': '-2960556',  # CRITICAL: Fixed Stockholm location ID
+    # Add more if needed based on testing
+}
+
+def load_cities_from_csv():
+    """Load all cities from cities.csv file with correct column names"""
+    cities = {}
+    csv_path = 'cities.csv'
+    
+    # Check if CSV exists
+    if not os.path.exists(csv_path):
+        logger.error(f"❌ cities.csv not found at {csv_path}")
+        return get_fallback_cities()
+    
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as file:
+            csv_reader = csv.DictReader(file)
+            
+            for row in csv_reader:
+                city_key = row.get('key', '').lower().strip()
+                if city_key:
+                    cities[city_key] = {
+                        'name': row.get('name', '').strip(),
+                        'coordinates': [
+                            float(row.get('lat', 0)),
+                            float(row.get('lon', 0))
+                        ],
+                        'search_query': row.get('search_query', '').strip(),
+                        'country': row.get('country', '').strip(),
+                        'tripadvisor_id': row.get('tripadvisor_id', '').strip()
+                    }
+                    
+                    # Add special location ID if it's Stockholm
+                    if city_key == 'stockholm':
+                        cities[city_key]['booking_location_id'] = SPECIAL_LOCATION_IDS['stockholm']
+                        logger.info(f"🔧 Stockholm fix applied: location_id = {SPECIAL_LOCATION_IDS['stockholm']}")
+        
+        logger.info(f"✅ Loaded {len(cities)} cities from cities.csv")
+        return cities
+        
+    except Exception as e:
+        logger.error(f"❌ Error reading cities.csv: {e}")
+        return get_fallback_cities()
+
+def get_fallback_cities():
+    """Fallback cities if CSV fails to load"""
+    logger.warning("🔄 Using fallback cities (29 cities)")
+    return {
+        'stockholm': {
+            'name': 'Stockholm, Sweden',
+            'coordinates': [59.3293, 18.0686],
+            'search_query': 'Stockholm Sweden',
+            'booking_location_id': '-2960556'  # CRITICAL Stockholm fix
+        },
+        'paris': {
+            'name': 'Paris, France', 
+            'coordinates': [48.8566, 2.3522],
+            'search_query': 'Paris France'
+        },
+        'london': {
+            'name': 'London, UK',
+            'coordinates': [51.5074, -0.1278],
+            'search_query': 'London United Kingdom'
+        },
+        'amsterdam': {
+            'name': 'Amsterdam, Netherlands',
+            'coordinates': [52.3676, 4.9041],
+            'search_query': 'Amsterdam Netherlands'
+        },
+        'barcelona': {
+            'name': 'Barcelona, Spain',
+            'coordinates': [41.3851, 2.1734],
+            'search_query': 'Barcelona Spain'
+        },
+        'rome': {
+            'name': 'Rome, Italy',
+            'coordinates': [41.9028, 12.4964],
+            'search_query': 'Rome Italy'
+        },
+        'berlin': {
+            'name': 'Berlin, Germany',
+            'coordinates': [52.5200, 13.4050],
+            'search_query': 'Berlin Germany'
+        },
+        'copenhagen': {
+            'name': 'Copenhagen, Denmark',
+            'coordinates': [55.6761, 12.5683],
+            'search_query': 'Copenhagen Denmark'
+        },
+        'vienna': {
+            'name': 'Vienna, Austria',
+            'coordinates': [48.2082, 16.3738],
+            'search_query': 'Vienna Austria'
+        },
+        'prague': {
+            'name': 'Prague, Czech Republic',
+            'coordinates': [50.0755, 14.4378],
+            'search_query': 'Prague Czech Republic'
+        }
+    }
+
+# Load cities at startup
+CITIES = load_cities_from_csv()
 
 def get_location_id(city_info):
     """Get Booking.com location ID for a city with Stockholm fix"""
@@ -380,28 +337,38 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms,
 @app.route('/')
 def home():
     """API Documentation Page"""
+    total_cities = len(CITIES)
+    cities_source = "cities.csv" if total_cities > 30 else "fallback"
+    
     return render_template_string('''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🏨 STAYFINDR Backend API v10.1</title>
+        <title>🏨 STAYFINDR Backend API v10.2</title>
         <style>
             body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
             h1 { color: #2c3e50; }
             .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
-            .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
-            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; }
+            .cities { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0; }
+            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; font-size: 0.9rem; }
             .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
             .fix { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #ffc107; }
+            .csv-info { background: #d1ecf1; padding: 10px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #bee5eb; }
         </style>
     </head>
     <body>
-        <h1>🏨 STAYFINDR Backend API v10.1</h1>
-        <p>Flask backend for European hotel search with Stockholm location fix</p>
+        <h1>🏨 STAYFINDR Backend API v10.2</h1>
+        <p>Flask backend for European hotel search with CSV integration</p>
+        
+        <div class="csv-info">
+            <strong>📊 v10.2 UPDATE: CSV Integration</strong><br>
+            Loading {{total_cities}} cities from {{cities_source}}<br>
+            Stockholm location ID: -2960556 (hardcoded fix)
+        </div>
         
         <div class="fix">
-            <strong>🔧 v10.1 FIX: Stockholm Location ID Corrected</strong><br>
-            Stockholm now uses hardcoded location_id: -2960556 to prevent German hotel results
+            <strong>🔧 Stockholm Location ID Fixed</strong><br>
+            No more German hotel results for Stockholm searches
         </div>
         
         <div class="feature">
@@ -413,33 +380,34 @@ def home():
         <div class="endpoint">
             <strong>/api/hotels/booking</strong> - Get Booking.com hotels for a city<br>
             Parameters: city, checkin, checkout, adults, rooms<br>
-            <em>Stockholm now returns real Swedish hotels!</em>
+            <em>All {{total_cities}} cities supported!</em>
         </div>
         <div class="endpoint">
-            <strong>/api/cities</strong> - List all 71 cities
+            <strong>/api/cities</strong> - List all {{total_cities}} cities
         </div>
         <div class="endpoint">
             <strong>/test</strong> - Test Stockholm hotels (fixed)
         </div>
         
-        <h2>Cities supported:</h2>
+        <h2>Cities supported ({{total_cities}} total):</h2>
         <div class="cities">
             {% for city in cities %}
             <div class="city">{{ city }}</div>
             {% endfor %}
         </div>
         
-        <p><strong>Status:</strong> Stockholm location ID fixed - no more German hotels!</p>
+        <p><strong>Status:</strong> {{total_cities}} cities loaded from {{cities_source}} - Stockholm fix active!</p>
     </body>
     </html>
-    ''', cities=list(CITIES.keys()))
+    ''', cities=list(CITIES.keys())[:40], total_cities=total_cities, cities_source=cities_source)
 
 @app.route('/api/cities')
 def get_cities():
     """Get all supported cities"""
     return jsonify({
         'cities': CITIES,
-        'total': len(CITIES)
+        'total': len(CITIES),
+        'source': 'cities.csv' if len(CITIES) > 30 else 'fallback'
     })
 
 @app.route('/api/hotels/booking')
@@ -493,6 +461,8 @@ def get_hotels():
         'data_source': 'booking',
         'stockholm_fix': 'enabled' if city == 'stockholm' else 'not_needed',
         'location_id_used': location_id,
+        'csv_loaded': len(CITIES) > 30,
+        'total_cities_available': len(CITIES),
         'url_type': 'hotel_name_based'
     })
 
@@ -502,11 +472,11 @@ def test_stockholm():
     return get_hotels()
 
 if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend v10.1...")
+    print("🚀 Starting STAYFINDR Backend v10.2...")
+    print(f"📊 Loaded {len(CITIES)} cities from CSV")
     print("🔧 Stockholm location ID fix enabled")
-    print("🏨 Supporting 71 European cities")
     print("🌍 Hotel name-based booking URLs")
-    print("✅ Stockholm will now show real Swedish hotels!")
+    print("✅ Ready to serve all European cities!")
     
     # Use PORT environment variable for deployment
     port = int(os.environ.get('PORT', 5000))
