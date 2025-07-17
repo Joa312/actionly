@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-STAYFINDR Backend API - Flask Version
-European Hotel Search Engine med BÅDE Booking.com OCH TripAdvisor
-Version: 2.0 - Flask Dual Platform Edition
+STAYFINDR Backend API - Fixad Flask Version
+European Hotel Search Engine med förbättrad felhantering
 """
 
-import csv
 import os
 import logging
 import json
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from datetime import datetime
 from urllib.parse import quote_plus
 
 import requests
@@ -24,49 +21,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Flask app initiering
+# Flask app
 app = Flask(__name__)
 CORS(app)
 
 # API konfiguration
-BOOKING_HOST = "booking-com15.p.rapidapi.com"
-TRIPADVISOR_HOST = "tripadvisor1.p.rapidapi.com"
 API_KEY = os.getenv("RAPIDAPI_KEY", "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999")
 
+# Förbättrade headers för båda API:er
 BOOKING_HEADERS = {
     "X-RapidAPI-Key": API_KEY,
-    "X-RapidAPI-Host": BOOKING_HOST
+    "X-RapidAPI-Host": "booking-com15.p.rapidapi.com"
 }
 
 TRIPADVISOR_HEADERS = {
     "X-RapidAPI-Key": API_KEY,
-    "X-RapidAPI-Host": TRIPADVISOR_HOST
+    "X-RapidAPI-Host": "tripadvisor1.p.rapidapi.com"
 }
 
-# Room type mappings
-ROOM_TYPE_MAPPING = {
-    "single": {"guests": 1, "description": "Single Room - Perfect for solo travelers"},
-    "double": {"guests": 2, "description": "Double Room - Ideal for couples"},
-    "family": {"guests": 4, "description": "Family Room - Spacious for families"},
-    "junior_suite": {"guests": 2, "description": "Junior Suite - Spacious room with sitting area"},
-    "suite": {"guests": 3, "description": "Suite/Apartment - Premium accommodation"}
+# Fallback städer för Booking.com (om CSV saknas)
+FALLBACK_CITIES = {
+    'stockholm': '1371',
+    'paris': '-1456928',
+    'london': '-2601889',
+    'barcelona': '-372490',
+    'rome': '-126693',
+    'amsterdam': '-2140479',
+    'berlin': '-1746443',
+    'copenhagen': '-2745240',
+    'vienna': '-1995499',
+    'prague': '-553173',
+    'madrid': '-390625',
+    'milan': '-121726'
 }
 
-# Country codes för lokaliserade booking URLs
-COUNTRY_CODES = {
-    'stockholm': 'sv', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
-    'paris': 'fr', 'lyon': 'fr', 'nice': 'fr',
-    'london': 'en-gb', 'edinburgh': 'en-gb',
-    'amsterdam': 'nl', 'brussels': 'nl',
-    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es',
-    'rome': 'it', 'milano': 'it', 'florence': 'it',
-    'berlin': 'de', 'munich': 'de',
-    'vienna': 'de', 'zurich': 'de',
-    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu',
-    'dublin': 'en-gb', 'lisbon': 'pt', 'athens': 'el', 'santorini': 'el'
-}
-
-# TripAdvisor location mappings
+# TripAdvisor location IDs
 TRIPADVISOR_LOCATIONS = {
     'stockholm': '189839',
     'paris': '187147', 
@@ -79,157 +68,118 @@ TRIPADVISOR_LOCATIONS = {
     'vienna': '190454',
     'prague': '274707',
     'madrid': '187514',
-    'milan': '187849',
-    'zurich': '188113',
-    'oslo': '190479',
-    'helsinki': '189896',
-    'warsaw': '274856',
-    'budapest': '274887',
-    'dublin': '186605',
-    'lisbon': '189158',
-    'athens': '189398'
+    'milan': '187849'
 }
 
-# Helper functions
+# Country codes för lokaliserade URLs
+COUNTRY_CODES = {
+    'stockholm': 'sv', 'paris': 'fr', 'london': 'en-gb', 'barcelona': 'es',
+    'rome': 'it', 'amsterdam': 'nl', 'berlin': 'de', 'copenhagen': 'dk',
+    'vienna': 'de', 'prague': 'cs', 'madrid': 'es', 'milan': 'it'
+}
+
 def validate_api_key():
-    """Validera API-nyckel"""
+    """Kontrollera API-nyckel"""
     if not API_KEY or API_KEY == "YOUR_RAPIDAPI_KEY":
-        logger.error("API key not configured")
+        logger.error("❌ API key saknas eller är inte konfigurerad")
         return False
+    logger.info(f"✅ API key konfigurerad: {API_KEY[:10]}...")
     return True
 
-def get_city_id(city_name: str) -> Optional[str]:
-    """Hämta city ID från CSV-fil för Booking.com"""
-    csv_file = "cities.csv"
+def get_booking_city_id(city: str) -> str:
+    """Hämta Booking.com city ID"""
+    city_lower = city.lower()
+    city_id = FALLBACK_CITIES.get(city_lower)
     
-    if not os.path.exists(csv_file):
-        logger.warning(f"Cities CSV file not found: {csv_file}")
-        # Fallback mapping för vanliga städer
-        fallback_cities = {
-            'stockholm': '1371',
-            'paris': '-1456928',
-            'london': '-2601889',
-            'barcelona': '-372490',
-            'rome': '-126693',
-            'amsterdam': '-2140479',
-            'berlin': '-1746443',
-            'copenhagen': '-2745240',
-            'vienna': '-1995499',
-            'prague': '-553173'
-        }
-        return fallback_cities.get(city_name.lower())
+    if city_id:
+        logger.info(f"✅ Hittade Booking.com ID för {city}: {city_id}")
+    else:
+        logger.warning(f"❌ Staden {city} stöds inte")
     
-    try:
-        with open(csv_file, newline="", encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                if row["city"].strip().lower() == city_name.strip().lower():
-                    logger.info(f"Found Booking.com city ID for {city_name}: {row['dest_id']}")
-                    return row["dest_id"]
-    except Exception as e:
-        logger.error(f"Error reading cities.csv: {e}")
-        return None
-    
-    logger.warning(f"City not found in CSV: {city_name}")
-    return None
+    return city_id
 
-def search_hotels_booking_api(dest_id: str, checkin: str, checkout: str, 
-                             adults: int, rooms: int) -> Optional[Dict]:
-    """Sök hotell via Booking.com API"""
-    url = f"https://{BOOKING_HOST}/api/v1/hotels/searchHotels"
+def search_booking_hotels(dest_id: str, checkin: str, checkout: str, adults: int, rooms: int):
+    """Sök hotell från Booking.com med förbättrad felhantering"""
+    url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels"
     
     params = {
         "dest_id": dest_id,
-        "dest_type": "city",
+        "dest_type": "city", 
         "checkin_date": checkin,
         "checkout_date": checkout,
         "room_number": rooms,
         "guest_number": adults,
         "locale": "en-gb",
         "currency": "EUR",
-        "order_by": "popularity",
-        "units": "metric",
-        "filter_by_currency": "EUR"
+        "order_by": "popularity"
     }
     
+    logger.info(f"🔍 Booking.com API anrop: {url}")
+    logger.info(f"📋 Parametrar: {params}")
+    
     try:
-        response = requests.get(url, headers=BOOKING_HEADERS, params=params, timeout=30)
-        logger.info(f"Booking.com API call: {response.status_code}")
+        response = requests.get(url, headers=BOOKING_HEADERS, params=params, timeout=15)
+        
+        logger.info(f"📡 Booking.com svar: {response.status_code}")
         
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            hotels = data.get('data', [])
+            logger.info(f"✅ Booking.com: {len(hotels)} hotell hittade")
+            return data
         else:
-            logger.error(f"Booking.com API error: {response.status_code} - {response.text}")
+            logger.error(f"❌ Booking.com API fel: {response.status_code}")
+            logger.error(f"❌ Svar: {response.text[:200]}")
             return None
+            
+    except requests.exceptions.Timeout:
+        logger.error("❌ Booking.com API timeout")
+        return None
     except Exception as e:
-        logger.error(f"Error calling Booking.com API: {e}")
+        logger.error(f"❌ Booking.com fel: {e}")
         return None
 
-def get_tripadvisor_hotels(location_id: str, limit: int = 30) -> Optional[Dict]:
-    """Hämta hotell från TripAdvisor API"""
-    url = f"https://{TRIPADVISOR_HOST}/hotels/list"
+def search_tripadvisor_hotels(location_id: str):
+    """Sök hotell från TripAdvisor"""
+    url = "https://tripadvisor1.p.rapidapi.com/hotels/list"
     
     params = {
         "location_id": location_id,
-        "limit": str(limit),
+        "limit": "20",
         "sort": "recommended",
         "offset": "0",
         "currency": "EUR",
         "lang": "en_US"
     }
     
+    logger.info(f"🔍 TripAdvisor API anrop: {url}")
+    
     try:
-        response = requests.get(url, headers=TRIPADVISOR_HEADERS, params=params, timeout=30)
-        logger.info(f"TripAdvisor API call: {response.status_code}")
+        response = requests.get(url, headers=TRIPADVISOR_HEADERS, params=params, timeout=15)
+        
+        logger.info(f"📡 TripAdvisor svar: {response.status_code}")
         
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            hotels = data.get('data', [])
+            logger.info(f"✅ TripAdvisor: {len(hotels)} hotell hittade")
+            return data
         else:
-            logger.error(f"TripAdvisor API error: {response.status_code} - {response.text}")
+            logger.error(f"❌ TripAdvisor API fel: {response.status_code}")
+            logger.error(f"❌ Svar: {response.text[:200]}")
             return None
+            
     except Exception as e:
-        logger.error(f"Error calling TripAdvisor API: {e}")
+        logger.error(f"❌ TripAdvisor fel: {e}")
         return None
 
-def find_tripadvisor_hotel_by_name(hotel_name: str, tripadvisor_hotels: List[Dict]) -> Optional[Dict]:
-    """Matcha Booking.com hotell med TripAdvisor hotell baserat på namn"""
-    if not tripadvisor_hotels:
-        return None
-    
-    # Normalisera hotellnamn för matchning
-    normalized_booking_name = hotel_name.lower().strip()
-    
-    # Exakt matchning först
-    for ta_hotel in tripadvisor_hotels:
-        ta_name = ta_hotel.get('name', '').lower().strip()
-        if normalized_booking_name == ta_name:
-            return ta_hotel
-    
-    # Partiell matchning som backup
-    for ta_hotel in tripadvisor_hotels:
-        ta_name = ta_hotel.get('name', '').lower().strip()
-        # Kontrollera om hotellnamnen överlappar med minst 2 ord
-        booking_words = set(normalized_booking_name.split())
-        ta_words = set(ta_name.split())
-        
-        if len(booking_words.intersection(ta_words)) >= 2:
-            return ta_hotel
-    
-    return None
-
-def create_booking_url(hotel: Dict, city_key: str, checkin: str, checkout: str, 
-                      adults: int, rooms: int, room_type: Optional[str] = None) -> str:
-    """Skapa lokaliserad Booking.com URL med hotellnamn"""
+def create_booking_url(hotel, city_key, checkin, checkout, adults, rooms):
+    """Skapa Booking.com URL"""
     hotel_name = hotel.get('name', 'Hotel')
-    hotel_id = hotel.get('id') or hotel.get('hotel_id')
-    
-    # Hämta landskod för staden
+    hotel_id = hotel.get('id', '')
     country_code = COUNTRY_CODES.get(city_key.lower(), 'en-gb')
     
-    # Skapa hotellnamn-baserad sök-URL
     if hotel_id and hotel_name:
-        hotel_name_encoded = quote_plus(hotel_name)
-        
         base_params = {
             'ss': hotel_name,
             'dest_id': hotel_id,
@@ -238,143 +188,85 @@ def create_booking_url(hotel: Dict, city_key: str, checkin: str, checkout: str,
             'checkout': checkout,
             'group_adults': adults,
             'no_rooms': rooms,
-            'group_children': 0,
             'search_selected': 'true'
         }
-        
-        if room_type and room_type in ROOM_TYPE_MAPPING:
-            base_params['room_type'] = room_type
         
         params_string = '&'.join([f"{key}={quote_plus(str(value))}" 
                                 for key, value in base_params.items()])
         
         return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
     
-    # Fallback URL
     return f"https://www.booking.com/searchresults.{country_code}.html?ss={quote_plus(hotel_name)}"
 
-def create_tripadvisor_url(tripadvisor_hotel: Optional[Dict], city_key: str, 
-                          checkin: str, checkout: str, guests: int, 
-                          fallback_name: str = "") -> str:
+def create_tripadvisor_url(hotel_name, city_key, tripadvisor_id=None):
     """Skapa TripAdvisor URL"""
-    if tripadvisor_hotel:
-        hotel_id = tripadvisor_hotel.get('location_id', '')
-        tripadvisor_location_id = TRIPADVISOR_LOCATIONS.get(city_key.lower(), '')
-        
-        if hotel_id and tripadvisor_location_id:
-            # Skapa TripAdvisor hotell-URL med booking parametrar
-            base_url = f"https://www.tripadvisor.com/Hotel_Review-g{tripadvisor_location_id}-d{hotel_id}"
-            
-            params = {
-                'checkin': checkin,
-                'checkout': checkout,
-                'adults': str(guests),
-                'rooms': '1'
-            }
-            
-            param_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-            return f"{base_url}?{param_string}"
+    if tripadvisor_id:
+        city_location_id = TRIPADVISOR_LOCATIONS.get(city_key.lower(), '')
+        if city_location_id:
+            return f"https://www.tripadvisor.com/Hotel_Review-g{city_location_id}-d{tripadvisor_id}"
     
-    # Fallback: Sök på TripAdvisor med hotellnamn
-    search_query = quote_plus(f"{fallback_name} {city_key}")
+    # Fallback: Sök på TripAdvisor
+    search_query = quote_plus(f"{hotel_name} {city_key}")
     return f"https://www.tripadvisor.com/Search?q={search_query}"
 
-def analyze_room_type_match(hotel: Dict, requested_room_type: Optional[str]) -> Optional[str]:
-    """Analysera om hotellet matchar begärd rumstyp"""
-    if not requested_room_type or requested_room_type not in ROOM_TYPE_MAPPING:
-        return None
-    
-    hotel_name = hotel.get('name', '').lower()
-    hotel_description = hotel.get('description', '').lower()
-    
-    type_keywords = {
-        'single': ['single', 'solo', 'individual'],
-        'double': ['double', 'couple', 'twin'],
-        'family': ['family', 'connecting', 'adjoining', 'kids'],
-        'junior_suite': ['junior suite', 'junior', 'sitting area', 'upgraded'],
-        'suite': ['suite', 'apartment', 'kitchen', 'separate', 'premium']
-    }
-    
-    keywords = type_keywords.get(requested_room_type, [])
-    text_to_search = f"{hotel_name} {hotel_description}"
-    
-    for keyword in keywords:
-        if keyword in text_to_search:
-            return ROOM_TYPE_MAPPING[requested_room_type]["description"]
-    
-    return None
-
-def process_dual_hotel_data(booking_hotels: List[Dict], tripadvisor_hotels: List[Dict],
-                           city_key: str, checkin: str, checkout: str, 
-                           adults: int, rooms: int, room_type: Optional[str] = None) -> List[Dict]:
-    """Bearbeta hotelldata från BÅDA källorna"""
+def process_hotel_data(booking_hotels, tripadvisor_hotels, city_key, checkin, checkout, adults, rooms):
+    """Bearbeta hotelldata från båda källorna"""
     processed_hotels = []
     
-    for i, booking_hotel in enumerate(booking_hotels[:50]):
+    for i, hotel in enumerate(booking_hotels[:20]):
         try:
-            # Extrahera Booking.com data
-            hotel_name = booking_hotel.get('name', f'Hotel {i+1}')
+            hotel_name = hotel.get('name', f'Hotel {i+1}')
             
-            # Koordinater från Booking.com
-            lat = booking_hotel.get('latitude')
-            lng = booking_hotel.get('longitude')
+            # Koordinater
+            lat = hotel.get('latitude', 0)
+            lng = hotel.get('longitude', 0)
             coordinates = [float(lat), float(lng)] if lat and lng else [0.0, 0.0]
             
-            # Pris från Booking.com
+            # Pris
             price = "Price on request"
-            if 'priceBreakdown' in booking_hotel:
-                price_info = booking_hotel['priceBreakdown'].get('grossPrice', {})
+            if 'priceBreakdown' in hotel:
+                price_info = hotel['priceBreakdown'].get('grossPrice', {})
                 if 'value' in price_info:
                     price = f"€{int(price_info['value'])}"
-            elif 'price' in booking_hotel:
-                price = f"€{booking_hotel['price']}"
+            elif 'price' in hotel:
+                price = f"€{hotel['price']}"
             
-            # Rating från Booking.com
-            rating = float(booking_hotel.get('reviewScore', 4.0))
+            # Rating
+            rating = float(hotel.get('reviewScore', 4.0))
             if rating > 5:
                 rating = rating / 2
             
             # Adress
-            address = booking_hotel.get('address', city_key)
+            address = hotel.get('address', city_key)
             
-            # Hitta matchande TripAdvisor hotell
-            matched_tripadvisor = find_tripadvisor_hotel_by_name(hotel_name, tripadvisor_hotels)
+            # Skapa URLs
+            booking_url = create_booking_url(hotel, city_key, checkin, checkout, adults, rooms)
+            tripadvisor_url = create_tripadvisor_url(hotel_name, city_key)
             
-            # Reviews count från TripAdvisor (om matchning finns)
+            # Hitta recensioner från TripAdvisor (om möjligt)
             reviews_count = None
-            if matched_tripadvisor:
-                reviews_count = int(matched_tripadvisor.get('num_reviews', 0))
+            for ta_hotel in tripadvisor_hotels:
+                if hotel_name.lower() in ta_hotel.get('name', '').lower():
+                    reviews_count = ta_hotel.get('num_reviews', 0)
+                    tripadvisor_url = create_tripadvisor_url(
+                        hotel_name, city_key, ta_hotel.get('location_id')
+                    )
+                    break
             
-            # Rumstyp-matchning
-            room_match = analyze_room_type_match(booking_hotel, room_type)
-            
-            # Skapa URLs för BÅDA plattformarna
-            booking_url = create_booking_url(
-                booking_hotel, city_key, checkin, checkout, adults, rooms, room_type
-            )
-            
-            tripadvisor_url = create_tripadvisor_url(
-                matched_tripadvisor, city_key, checkin, checkout, adults, hotel_name
-            )
-            
-            # Skapa hotel response
-            hotel_data = {
-                "id": booking_hotel.get('id', f'hotel_{i}'),
+            processed_hotels.append({
+                "id": hotel.get('id', f'hotel_{i}'),
                 "name": hotel_name,
                 "address": address,
                 "coordinates": coordinates,
                 "price": price,
                 "rating": rating,
                 "booking_url": booking_url,
-                "tripadvisor_url": tripadvisor_url,  # NY: TripAdvisor URL
-                "reviews_count": reviews_count,
-                "room_type_match": room_match
-            }
-            
-            processed_hotels.append(hotel_data)
+                "tripadvisor_url": tripadvisor_url,
+                "reviews_count": reviews_count
+            })
             
         except Exception as e:
-            logger.error(f"Error processing hotel {i}: {e}")
+            logger.error(f"❌ Fel vid bearbetning av hotell {i}: {e}")
             continue
     
     return processed_hotels
@@ -382,246 +274,178 @@ def process_dual_hotel_data(booking_hotels: List[Dict], tripadvisor_hotels: List
 # Flask Routes
 @app.route('/')
 def root():
-    """Root endpoint med API information"""
+    """Startsida"""
     return render_template_string('''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🏨 STAYFINDR Backend API - Dual Platform</title>
+        <title>🏨 STAYFINDR Backend - Dual Platform</title>
         <style>
             body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
             h1 { color: #2c3e50; }
+            .status { background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 20px 0; }
             .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
-            .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
-            .new { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 8px; }
         </style>
     </head>
     <body>
-        <h1>🏨 STAYFINDR Backend API - Dual Platform Edition</h1>
-        <p>Flask backend for European hotel search with BOTH Booking.com AND TripAdvisor integration</p>
+        <h1>🏨 STAYFINDR Backend API</h1>
+        <p>Flask backend med BÅDE Booking.com OCH TripAdvisor integration</p>
         
-        <div class="new">
-            <strong>🆕 NEW: Dual Platform Integration</strong><br>
-            Every hotel now includes BOTH Booking.com booking links AND TripAdvisor review links
-        </div>
-        
-        <div class="feature">
-            <strong>✅ Features:</strong><br>
-            • Hotel search from Booking.com<br>
-            • TripAdvisor reviews and links<br>
-            • Room type filtering with Junior Suite<br>
-            • Localized booking URLs<br>
-            • Smart hotel matching between platforms
+        <div class="status">
+            <strong>✅ Backend Status:</strong><br>
+            Flask server är live och redo för hotellsökningar!
         </div>
         
-        <h2>Available endpoints:</h2>
+        <h2>Endpoints:</h2>
         <div class="endpoint">
-            <strong>POST /hotels</strong> - Search hotels with dual platform data<br>
-            Parameters: city, checkin_date, checkout_date, guest_number, room_number, room_type<br>
-            <em>Returns hotels with BOTH booking and TripAdvisor URLs</em>
+            <strong>GET /test</strong> - Testa båda API:erna med Stockholm
         </div>
         <div class="endpoint">
-            <strong>GET /room-types</strong> - List all available room types
-        </div>
-        <div class="endpoint">
-            <strong>GET /cities</strong> - List all supported cities
-        </div>
-        <div class="endpoint">
-            <strong>GET /test</strong> - Test both APIs with Stockholm
+            <strong>POST /hotels</strong> - Sök hotell med dual platform data
         </div>
         <div class="endpoint">
             <strong>GET /health</strong> - Health check
         </div>
         
-        <h2>Data Sources:</h2>
-        <p>✅ Booking.com (Primary hotel data + booking links)<br>
-        ✅ TripAdvisor (Reviews + additional hotel links)</p>
-        
-        <h2>Supported Cities:</h2>
-        <p>{{ cities|length }} European cities with dual platform support</p>
+        <p><strong>Supported cities:</strong> {{ cities|length }} europeiska städer</p>
+        <p><strong>Data sources:</strong> Booking.com + TripAdvisor</p>
     </body>
     </html>
-    ''', cities=TRIPADVISOR_LOCATIONS)
+    ''', cities=FALLBACK_CITIES)
 
 @app.route('/health')
-def health_check():
-    """Health check endpoint"""
-    api_key_valid = validate_api_key()
+def health():
+    """Health check med detaljerad information"""
+    api_valid = validate_api_key()
     
     return jsonify({
-        "status": "healthy" if api_key_valid else "unhealthy",
-        "api_key": "configured" if api_key_valid else "missing",
-        "data_sources": ["Booking.com", "TripAdvisor"],
-        "supported_cities": len(TRIPADVISOR_LOCATIONS),
-        "room_types": list(ROOM_TYPE_MAPPING.keys()),
+        "status": "healthy" if api_valid else "unhealthy",
+        "api_key_configured": api_valid,
+        "api_key_preview": f"{API_KEY[:10]}..." if API_KEY else "None",
+        "supported_cities": len(FALLBACK_CITIES),
+        "tripadvisor_cities": len(TRIPADVISOR_LOCATIONS),
         "timestamp": datetime.now().isoformat()
     })
 
+@app.route('/test')
+def test():
+    """Test endpoint med detaljerad information"""
+    logger.info("🧪 Startar test av båda API:erna...")
+    
+    # Kontrollera API-nyckel
+    if not validate_api_key():
+        return jsonify({
+            "status": "error",
+            "message": "API key inte konfigurerad",
+            "api_key_preview": f"{API_KEY[:10]}..." if API_KEY else "None"
+        })
+    
+    # Test Stockholm
+    booking_dest_id = get_booking_city_id("stockholm")
+    tripadvisor_location_id = TRIPADVISOR_LOCATIONS.get("stockholm")
+    
+    if not booking_dest_id:
+        return jsonify({
+            "status": "error",
+            "message": "Stockholm inte hittad i Booking.com data"
+        })
+    
+    # Testa Booking.com
+    logger.info("🔍 Testar Booking.com API...")
+    booking_data = search_booking_hotels(booking_dest_id, "2025-07-20", "2025-07-22", 2, 1)
+    
+    # Testa TripAdvisor
+    logger.info("🔍 Testar TripAdvisor API...")
+    tripadvisor_data = search_tripadvisor_hotels(tripadvisor_location_id) if tripadvisor_location_id else None
+    
+    # Resultat
+    booking_hotels = booking_data.get('data', []) if booking_data else []
+    tripadvisor_hotels = tripadvisor_data.get('data', []) if tripadvisor_data else []
+    
+    if booking_hotels:
+        processed = process_hotel_data(
+            booking_hotels[:3], tripadvisor_hotels, 
+            "stockholm", "2025-07-20", "2025-07-22", 2, 1
+        )
+        
+        return jsonify({
+            "status": "success",
+            "message": "Båda API:erna fungerar!",
+            "booking_hotels_found": len(booking_hotels),
+            "tripadvisor_hotels_found": len(tripadvisor_hotels),
+            "sample_hotels": processed,
+            "api_key_working": True
+        })
+    else:
+        return jsonify({
+            "status": "error", 
+            "message": "Ingen data från Booking.com",
+            "booking_response_status": "error" if not booking_data else "empty",
+            "tripadvisor_response_status": "error" if not tripadvisor_data else "empty",
+            "api_key_preview": f"{API_KEY[:10]}..."
+        })
+
 @app.route('/hotels', methods=['POST'])
 def search_hotels():
-    """Sök hotell från BÅDA Booking.com OCH TripAdvisor"""
+    """Sök hotell från båda plattformarna"""
     
-    # Validera API-nyckel
     if not validate_api_key():
-        return jsonify({"error": "API service not configured properly"}), 503
+        return jsonify({"error": "API inte konfigurerad"}), 503
     
     data = request.get_json()
     if not data:
-        return jsonify({"error": "JSON data required"}), 400
+        return jsonify({"error": "JSON data krävs"}), 400
     
-    # Extrahera parametrar
-    city = data.get('city')
-    checkin_date = data.get('checkin_date')
-    checkout_date = data.get('checkout_date')
-    guest_number = int(data.get('guest_number', 2))
-    room_number = int(data.get('room_number', 1))
-    room_type = data.get('room_type')
+    city = data.get('city', '').lower()
+    checkin = data.get('checkin_date')
+    checkout = data.get('checkout_date')
+    adults = int(data.get('guest_number', 2))
+    rooms = int(data.get('room_number', 1))
     
-    if not all([city, checkin_date, checkout_date]):
-        return jsonify({"error": "Missing required parameters: city, checkin_date, checkout_date"}), 400
+    if not all([city, checkin, checkout]):
+        return jsonify({"error": "city, checkin_date och checkout_date krävs"}), 400
     
-    # Hämta Booking.com city ID
-    booking_dest_id = get_city_id(city)
-    if not booking_dest_id:
-        return jsonify({"error": f"City '{city}' not found in Booking.com database"}), 404
+    # Hämta city IDs
+    booking_id = get_booking_city_id(city)
+    tripadvisor_id = TRIPADVISOR_LOCATIONS.get(city)
     
-    # Hämta TripAdvisor location ID
-    tripadvisor_location_id = TRIPADVISOR_LOCATIONS.get(city.lower())
-    
-    # Validera rumstyp
-    if room_type and room_type not in ROOM_TYPE_MAPPING:
-        return jsonify({"error": f"Invalid room type. Available: {list(ROOM_TYPE_MAPPING.keys())}"}), 400
+    if not booking_id:
+        return jsonify({"error": f"Staden {city} stöds inte"}), 404
     
     try:
-        # API-anrop till båda tjänsterna
-        booking_data = search_hotels_booking_api(
-            booking_dest_id, checkin_date, checkout_date, guest_number, room_number
-        )
+        # Sök på båda plattformarna
+        booking_data = search_booking_hotels(booking_id, checkin, checkout, adults, rooms)
+        tripadvisor_data = search_tripadvisor_hotels(tripadvisor_id) if tripadvisor_id else None
         
-        tripadvisor_data = None
-        if tripadvisor_location_id:
-            tripadvisor_data = get_tripadvisor_hotels(tripadvisor_location_id)
+        if not booking_data or not booking_data.get('data'):
+            return jsonify({"error": "Inga hotell hittade"}), 404
         
-        # Kontrollera Booking.com data
-        if not booking_data or 'data' not in booking_data:
-            return jsonify({"error": "No hotels found from Booking.com"}), 404
-        
-        booking_hotels = booking_data.get('data', [])
+        booking_hotels = booking_data['data']
         tripadvisor_hotels = tripadvisor_data.get('data', []) if tripadvisor_data else []
         
-        if not booking_hotels:
-            return jsonify({"error": "No hotels found for the specified criteria"}), 404
-        
-        # Bearbeta data från BÅDA källor
-        processed_hotels = process_dual_hotel_data(
-            booking_hotels, tripadvisor_hotels, city,
-            checkin_date, checkout_date, guest_number, room_number, room_type
+        # Bearbeta data
+        processed = process_hotel_data(
+            booking_hotels, tripadvisor_hotels, city, checkin, checkout, adults, rooms
         )
         
-        # Skapa response
         return jsonify({
-            "city": city,
-            "hotels": processed_hotels,
-            "total_found": len(processed_hotels),
+            "city": city.title(),
+            "hotels": processed,
+            "total_found": len(processed),
             "search_params": {
-                "checkin": checkin_date,
-                "checkout": checkout_date,
-                "guests": guest_number,
-                "rooms": room_number
+                "checkin": checkin,
+                "checkout": checkout,
+                "guests": adults,
+                "rooms": rooms
             },
-            "room_filter": room_type,
-            "data_sources": ["Booking.com", "TripAdvisor"],
-            "booking_optimization": "enabled",
-            "tripadvisor_integration": "enabled"
+            "data_sources": ["Booking.com", "TripAdvisor"]
         })
         
     except Exception as e:
-        logger.error(f"Search error: {e}")
-        return jsonify({"error": f"Service error: {str(e)}"}), 503
+        logger.error(f"❌ Sökfel: {e}")
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/room-types', methods=['GET'])
-def get_room_types():
-    """Hämta tillgängliga rumstyper"""
-    return jsonify({
-        "room_types": ROOM_TYPE_MAPPING,
-        "available_types": list(ROOM_TYPE_MAPPING.keys())
-    })
-
-@app.route('/cities', methods=['GET'])
-def get_supported_cities():
-    """Hämta alla städer som stöds"""
-    cities = []
-    for city_key, tripadvisor_id in TRIPADVISOR_LOCATIONS.items():
-        booking_id = get_city_id(city_key)
-        cities.append({
-            "city": city_key,
-            "booking_dest_id": booking_id,
-            "tripadvisor_location_id": tripadvisor_id,
-            "country_code": COUNTRY_CODES.get(city_key, "en-gb"),
-            "both_platforms": bool(booking_id and tripadvisor_id)
-        })
-    
-    return jsonify({
-        "cities": cities,
-        "total": len(cities),
-        "dual_platform_cities": len([c for c in cities if c["both_platforms"]]),
-        "data_sources": ["Booking.com", "TripAdvisor"]
-    })
-
-@app.route('/test', methods=['GET'])
-def test_dual_integration():
-    """Test endpoint för både Booking.com och TripAdvisor"""
-    try:
-        # Test Stockholm med båda API:er
-        booking_data = search_hotels_booking_api("1371", "2025-07-20", "2025-07-22", 2, 1)
-        tripadvisor_data = get_tripadvisor_hotels("189839", 5)
-        
-        booking_hotels = booking_data.get('data', []) if booking_data else []
-        tripadvisor_hotels = tripadvisor_data.get('data', []) if tripadvisor_data else []
-        
-        if booking_hotels:
-            processed = process_dual_hotel_data(
-                booking_hotels[:3], tripadvisor_hotels,
-                "stockholm", "2025-07-20", "2025-07-22", 2, 1
-            )
-            
-            return jsonify({
-                "status": "success",
-                "test_city": "Stockholm",
-                "booking_hotels_found": len(booking_hotels),
-                "tripadvisor_hotels_found": len(tripadvisor_hotels),
-                "sample_hotels": processed,
-                "data_sources": ["Booking.com", "TripAdvisor"],
-                "api_keys_working": True
-            })
-        else:
-            return jsonify({
-                "status": "error",
-                "message": "No Booking.com data found",
-                "booking_response": booking_data,
-                "tripadvisor_response": tripadvisor_data
-            })
-            
-    except Exception as e:
-        logger.error(f"Test endpoint error: {e}")
-        return jsonify({
-            "status": "error", 
-            "message": str(e)
-        })
-
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({"error": "Endpoint not found"}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({"error": "Internal server error"}), 500
-
-# Development server
 if __name__ == "__main__":
-    logger.info("Starting STAYFINDR Backend API v2.0 - Flask Dual Platform Edition")
-    logger.info("Supporting BOTH Booking.com AND TripAdvisor integration")
-    
+    logger.info("🚀 Startar STAYFINDR Flask Backend...")
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
