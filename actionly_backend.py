@@ -1,7 +1,7 @@
-# STAYFINDR BACKEND v8.3 - Final Dynamic Version
-# FINAL FIX: Based on 403 Forbidden logs, this version reverts TripAdvisor back to the modern, dynamic ID lookup
-# using the tripadvisor-com1.p.rapidapi.com endpoint. This is the only confirmed working method.
-# It combines the stable Booking.com logic with the necessary dynamic logic for TripAdvisor.
+# STAYFINDR BACKEND v8.4 - Final Corrected Logic
+# FINAL FIX: Implemented the correct, deeply-nested path to extract 'contentId' for TripAdvisor searches,
+# based on user-provided documentation. This enables the necessary two-step search process to function correctly.
+# This should be the definitive fix for the TripAdvisor empty results issue.
 
 import os
 import logging
@@ -34,7 +34,6 @@ URL_REGEX = re.compile(r'\d+')
 
 # --- Data Loading ---
 def load_cities_from_csv(filename='cities.csv'):
-    """Loads cities from CSV. Only 'key', 'name', and 'search_query' for booking are used."""
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
@@ -47,6 +46,7 @@ def load_cities_from_csv(filename='cities.csv'):
                 cities[key] = {
                     'name': row.get('name', 'N/A').replace('"', '').strip(),
                     'search_query': row.get('search_query', ''),
+                    'tripadvisor_id': row.get('tripadvisor_id', '')
                 }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
@@ -78,31 +78,23 @@ def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
     response.raise_for_status()
     return response.json()
 
-def get_tripadvisor_geo_id(city_name):
-    """Dynamically fetches the Geo ID from TripAdvisor based on city name."""
-    url = f"https://{TRIPADVISOR_API_HOST}/locations/search"
-    params = {"query": city_name, "lang": "en_US", "units": "km"}
-    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-    if data.get('data'):
-        for item in data['data']:
-            if item.get('result_type') == 'geography':
-                if geo_id := item.get('result_object', {}).get('location_id'):
-                    logging.info(f"Found TripAdvisor geoId: {geo_id} for city: {city_name}")
-                    return geo_id
-    logging.warning(f"Could not find TripAdvisor geoId for city: {city_name}")
-    return None
-
-def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
-    """Searches TripAdvisor hotels using a dynamically fetched Geo ID."""
-    if not geo_id: return None
+def search_tripadvisor_hotels_list(geo_id):
+    """Step 1 (TripAdvisor): Get a list of hotels to find their contentIds."""
+    if not geo_id: return []
     url = f"https://{TRIPADVISOR_API_HOST}/hotels/search"
-    params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
+    params = {"geoId": geo_id, "lang": "en_US"}
     response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
     response.raise_for_status()
     data = response.json()
     return data.get('data', [])
+
+def get_tripadvisor_hotel_offers(content_id, checkin, checkout, adults):
+    """Step 2 (TripAdvisor): Get pricing/offers for a specific hotel using its contentId."""
+    url = f"https://{TRIPADVISOR_API_HOST}/hotels/offers"
+    params = {"contentId": content_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "currencyCode": "EUR"}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
+    response.raise_for_status()
+    return response.json()
 
 # --- Data Processing Functions ---
 
@@ -124,23 +116,20 @@ def process_booking_hotels(api_data, search_params):
         })
     return processed
 
-def process_tripadvisor_hotels(api_data):
-    processed = []
-    if not isinstance(api_data, list): return []
-    for hotel in api_data[:TRIPADVISOR_HOTEL_LIMIT]:
-        price = 'N/A'
-        if price_str := hotel.get('priceForDisplay'):
-            if numbers := URL_REGEX.findall(price_str.replace(',', '')):
-                price = int(numbers[0])
-        processed.append({
-            'id': hotel.get('id'), 'name': hotel.get('title', 'Unknown Hotel'),
-            'address': hotel.get('secondaryInfo', 'N/A'),
-            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', 0)), float(hotel.get('geoSummary', {}).get('longitude', 0))],
-            'price': price, 'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
-            'source': 'tripadvisor',
-            'booking_url': f"https://www.tripadvisor.com{hotel.get('commerceUrl')}" if hotel.get('commerceUrl') else f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
-        })
-    return processed
+def process_tripadvisor_hotel(hotel_summary, offers_data):
+    """Combines hotel summary data with its specific offer data."""
+    lowest_price_offer = min(offers_data.get('data', []), key=lambda x: x.get('price', float('inf')), default=None)
+    if not lowest_price_offer: return None
+
+    return {
+        'id': hotel_summary.get('id'), 'name': hotel_summary.get('title', 'Unknown Hotel'),
+        'address': hotel_summary.get('secondaryInfo', 'N/A'),
+        'coordinates': [float(hotel_summary.get('geoSummary', {}).get('latitude', 0)), float(hotel_summary.get('geoSummary', {}).get('longitude', 0))],
+        'price': int(lowest_price_offer.get('price')),
+        'rating': float(hotel_summary.get('bubbleRating', {}).get('rating', 4.0)),
+        'source': 'tripadvisor',
+        'booking_url': lowest_price_offer.get('url')
+    }
 
 # --- Unified API Route Handler ---
 
@@ -163,10 +152,25 @@ def handle_hotel_search(source):
             processed_hotels = process_booking_hotels(api_data, params)
 
         elif source == 'tripadvisor':
-            geo_id = get_tripadvisor_geo_id(city_name)
-            if not geo_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
-            api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
-            processed_hotels = process_tripadvisor_hotels(api_data)
+            geo_id = city_info.get('tripadvisor_id')
+            if not geo_id: return jsonify({'error': f"Inget TripAdvisor ID hittades för '{city_name}' i din CSV-fil."}), 404
+            
+            hotel_list = search_tripadvisor_hotels_list(geo_id)
+            for hotel_summary in hotel_list[:TRIPADVISOR_HOTEL_LIMIT]:
+                # KORRIGERING: Använder den korrekta, djupt nästlade sökvägen för att hitta contentId.
+                content_id = hotel_summary.get('cardLink', {}).get('route', {}).get('typedParams', {}).get('contentId')
+                if not content_id: 
+                    logging.warning(f"Could not find contentId for hotel: {hotel_summary.get('title')}")
+                    continue
+                try:
+                    offers_data = get_tripadvisor_hotel_offers(content_id, params['checkin'], params['checkout'], params['adults'])
+                    full_hotel_data = process_tripadvisor_hotel(hotel_summary, offers_data)
+                    if full_hotel_data:
+                        processed_hotels.append(full_hotel_data)
+                except RequestException as offer_error:
+                    logging.warning(f"Could not fetch offers for TripAdvisor hotel {content_id}: {offer_error}")
+                    continue
+
         else:
             return jsonify({'error': f"Source '{source}' is not supported."}), 400
         
@@ -182,7 +186,7 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v8.3</h1><p>Final dynamic version.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v8.4</h1><p>Final corrected TripAdvisor logic.</p>')
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
 @app.route('/api/room-types')
@@ -194,11 +198,11 @@ def get_booking_hotels_route(): return handle_hotel_search(source='booking')
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v8.3 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v8.4 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v8.3...")
+    logging.info("🚀 Starting STAYFINDR Backend v8.4...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
