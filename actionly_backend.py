@@ -1,7 +1,7 @@
-# STAYFINDR BACKEND v7.9 - Fully Dynamic Search
-# FINAL FIX: Re-implemented dynamic Geo ID lookup for TripAdvisor.
-# The system now dynamically fetches location IDs for BOTH Booking.com and TripAdvisor before every search.
-# This removes all reliance on static, potentially outdated IDs from the CSV file, which was the root cause of the empty results.
+# STAYFINDR BACKEND v8.0 - Resilient Data Processing
+# FINAL FIX: Enhanced the data processing functions to be crash-proof against unexpected API responses.
+# The system now explicitly checks if the received data is a list and provides a specific user-facing error
+# if the data format is incorrect, preventing silent failures and improving debuggability.
 
 import os
 import logging
@@ -113,7 +113,7 @@ def process_booking_hotels(api_data, search_params):
     processed = []
     hotels_data = api_data.get('data', [])
     if not isinstance(hotels_data, list):
-        logging.warning(f"Booking.com data processing received non-list data: {type(hotels_data)}")
+        logging.error(f"Booking.com API returned unexpected data format. Expected a list, got {type(hotels_data)}. Full response: {api_data}")
         return []
 
     for i, hotel in enumerate(hotels_data[:BOOKING_HOTEL_LIMIT]):
@@ -134,7 +134,7 @@ def process_tripadvisor_hotels(api_data):
     processed = []
     hotels_data = api_data.get('data', [])
     if not isinstance(hotels_data, list):
-        logging.warning(f"TripAdvisor API did not return a list of hotels.")
+        logging.error(f"TripAdvisor API returned unexpected data format. Expected a list, got {type(hotels_data)}. Full response: {api_data}")
         return []
 
     for i, hotel in enumerate(hotels_data[:TRIPADVISOR_HOTEL_LIMIT]):
@@ -164,24 +164,28 @@ def handle_hotel_search(source):
     
     try:
         logging.info(f"Handling '{source}' search for '{city_name}'.")
+        api_data = None
+        processed_hotels = []
+
         if source == 'booking':
             location_id = get_booking_location_id(city_info['search_query'])
-            if location_id:
-                api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
-                processed_hotels = process_booking_hotels(api_data, params)
-            else:
-                return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på Booking.com."}), 404
+            if not location_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på Booking.com."}), 404
+            api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
+            processed_hotels = process_booking_hotels(api_data, params)
 
         elif source == 'tripadvisor':
             geo_id = get_tripadvisor_geo_id(city_name)
-            if geo_id:
-                api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
-                processed_hotels = process_tripadvisor_hotels(api_data)
-            else:
-                return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
+            if not geo_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
+            api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
+            processed_hotels = process_tripadvisor_hotels(api_data)
         else:
             return jsonify({'error': f"Source '{source}' is not supported."}), 400
         
+        # Final check if processing failed due to bad data format
+        if not processed_hotels and api_data is not None:
+             if not isinstance(api_data.get('data', api_data), list):
+                 return jsonify({'error': f"{source.capitalize()} svarade med ett oväntat dataformat. Försök igen senare."}), 502
+
     except RequestException as e:
         status_code = e.response.status_code if e.response is not None else 500
         logging.error(f"API call to '{source}' failed with status {status_code}: {e}")
@@ -194,14 +198,13 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v7.9</h1><p>Fully dynamic search for all services.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v8.0</h1><p>Resilient data processing implemented.</p>')
 
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
 
 @app.route('/api/room-types')
 def get_room_types_route():
-    # Simplified room types as they are mainly for display
     room_types = {
         'single': {'name': 'Single Room', 'guests': 1},
         'double': {'name': 'Double Room', 'guests': 2},
@@ -216,11 +219,11 @@ def get_booking_hotels_route(): return handle_hotel_search(source='booking')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v7.9 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v8.0 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v7.9...")
+    logging.info("🚀 Starting STAYFINDR Backend v8.0...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
