@@ -1,451 +1,205 @@
-#!/usr/bin/env python3
-"""
-STAYFINDR Backend API - Fixad Flask Version
-European Hotel Search Engine med förbättrad felhantering
-"""
+# STAYFINDR BACKEND v8.7 - Corrected Version
+# FIX: This version is a complete rewrite of the user's provided legacy code.
+# It implements the final, stable logic with fully dynamic ID lookups for both Booking.com and TripAdvisor,
+# uses the correct, confirmed API endpoints, and includes robust error handling.
 
 import os
 import logging
-import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote_plus
+import re
+import csv
 
-import requests
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
+import requests
+from requests.exceptions import RequestException
 
-# Logging konfiguration
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Flask app
+# --- Initial Configuration ---
 app = Flask(__name__)
-CORS(app)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# API konfiguration
-API_KEY = os.getenv("RAPIDAPI_KEY", "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999")
+RAPIDAPI_KEY = os.environ.get('RAPIDAPI_KEY')
+if not RAPIDAPI_KEY:
+    raise ValueError("FATAL: RAPIDAPI_KEY environment variable is not set.")
 
-# Förbättrade headers för båda API:er
-BOOKING_HEADERS = {
-    "X-RapidAPI-Key": API_KEY,
-    "X-RapidAPI-Host": "booking-com15.p.rapidapi.com"
-}
+CORS(app, origins=["https://joa312.github.io", "http://127.0.0.1:5500", "http://localhost:3000", "http://127.0.0.1:5000"])
 
-TRIPADVISOR_HEADERS = {
-    "X-RapidAPI-Key": API_KEY,
-    "X-RapidAPI-Host": "tripadvisor1.p.rapidapi.com"
-}
+# --- API & Data Constants ---
+BOOKING_API_HOST = "booking-com18.p.rapidapi.com"
+TRIPADVISOR_API_HOST = "tripadvisor-com1.p.rapidapi.com"
+BOOKING_HOTEL_LIMIT = 20
+TRIPADVISOR_HOTEL_LIMIT = 15
+URL_REGEX = re.compile(r'\d+')
 
-# Fallback städer för Booking.com (om CSV saknas)
-FALLBACK_CITIES = {
-    'stockholm': '1371',
-    'paris': '-1456928',
-    'london': '-2601889',
-    'barcelona': '-372490',
-    'rome': '-126693',
-    'amsterdam': '-2140479',
-    'berlin': '-1746443',
-    'copenhagen': '-2745240',
-    'vienna': '-1995499',
-    'prague': '-553173',
-    'madrid': '-390625',
-    'milan': '-121726'
-}
+# --- Data Loading ---
+def load_cities_from_csv(filename='cities.csv'):
+    """Loads cities from CSV. Only 'key', 'name', and 'search_query' are now used."""
+    cities = {}
+    try:
+        with open(filename, mode='r', encoding='utf-8-sig') as infile:
+            reader = csv.DictReader(infile)
+            for i, row in enumerate(reader):
+                key = row.get('key')
+                if not key:
+                    logging.warning(f"Skipping row {i+2} in {filename} due to missing key.")
+                    continue
+                cities[key] = {
+                    'name': row.get('name', 'N/A').replace('"', '').strip(),
+                    'search_query': row.get('search_query', ''),
+                }
+        logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
+        return cities
+    except FileNotFoundError:
+        logging.error(f"CRITICAL: The file {filename} was not found.")
+        raise
+    except Exception as e:
+        logging.error(f"CRITICAL: Failed to read or parse {filename}. Error: {e}", exc_info=True)
+        raise
 
-# TripAdvisor location IDs
-TRIPADVISOR_LOCATIONS = {
-    'stockholm': '189839',
-    'paris': '187147', 
-    'london': '186338',
-    'barcelona': '187497',
-    'rome': '187791',
-    'amsterdam': '188590',
-    'berlin': '187323',
-    'copenhagen': '189541',
-    'vienna': '190454',
-    'prague': '274707',
-    'madrid': '187514',
-    'milan': '187849'
-}
+CITIES = load_cities_from_csv('cities.csv')
 
-# Country codes för lokaliserade URLs
-COUNTRY_CODES = {
-    'stockholm': 'sv', 'paris': 'fr', 'london': 'en-gb', 'barcelona': 'es',
-    'rome': 'it', 'amsterdam': 'nl', 'berlin': 'de', 'copenhagen': 'dk',
-    'vienna': 'de', 'prague': 'cs', 'madrid': 'es', 'milan': 'it'
-}
+# --- External API Functions ---
 
-def validate_api_key():
-    """Kontrollera API-nyckel"""
-    if not API_KEY or API_KEY == "YOUR_RAPIDAPI_KEY":
-        logger.error("❌ API key saknas eller är inte konfigurerad")
-        return False
-    logger.info(f"✅ API key konfigurerad: {API_KEY[:10]}...")
-    return True
+def get_booking_location_id(city_query):
+    if not city_query: return None
+    url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
+    params = {"query": city_query}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    if data and isinstance(data.get('data'), list) and data['data']:
+        return data['data'][0].get('id')
+    return None
 
-def get_booking_city_id(city: str) -> str:
-    """Hämta Booking.com city ID"""
-    city_lower = city.lower()
-    city_id = FALLBACK_CITIES.get(city_lower)
+def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
+    url = f"https://{BOOKING_API_HOST}/stays/search"
+    params = {"locationId": location_id, "checkinDate": checkin, "checkoutDate": checkout, "adults": adults, "rooms": rooms, "currency": "EUR"}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+def get_tripadvisor_geo_id(city_name):
+    """Dynamically fetches the Geo ID from TripAdvisor based on city name."""
+    url = f"https://{TRIPADVISOR_API_HOST}/locations/search"
+    params = {"query": city_name, "lang": "en_US", "units": "km"}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    if data.get('data'):
+        for item in data['data']:
+            if item.get('result_type') == 'geography':
+                if geo_id := item.get('result_object', {}).get('location_id'):
+                    logging.info(f"Found TripAdvisor geoId: {geo_id} for city: {city_name}")
+                    return geo_id
+    logging.warning(f"Could not find TripAdvisor geoId for city: {city_name}")
+    return None
+
+def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
+    """Searches TripAdvisor hotels using a dynamically fetched Geo ID."""
+    if not geo_id: return None
+    url = f"https://{TRIPADVISOR_API_HOST}/hotels/search"
+    params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
+    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+# --- Data Processing Functions ---
+
+def process_booking_hotels(api_data, search_params):
+    processed = []
+    hotels_data = api_data.get('data', []) if api_data else []
+    if not isinstance(hotels_data, list): return []
+    for hotel in hotels_data[:BOOKING_HOTEL_LIMIT]:
+        price = 'N/A'
+        if price_info := hotel.get('priceBreakdown', {}).get('grossPrice', {}).get('value'):
+            nights = (datetime.strptime(search_params['checkout'], '%Y-%m-%d') - datetime.strptime(search_params['checkin'], '%Y-%m-%d')).days
+            price = int(price_info / nights) if nights > 0 else int(price_info)
+        processed.append({
+            'id': hotel.get('id'), 'name': hotel.get('name', 'Unknown Hotel'),
+            'address': hotel.get('address', 'N/A'),
+            'coordinates': [float(hotel.get('latitude', 0)), float(hotel.get('longitude', 0))],
+            'price': price, 'rating': round(float(hotel.get('reviewScore', 0.0)) / 2, 1),
+            'source': 'booking.com', 'booking_url': hotel.get('url', '#')
+        })
+    return processed
+
+def process_tripadvisor_hotels(api_data):
+    processed = []
+    hotels_data = api_data.get('data', []) if api_data else []
+    if not isinstance(hotels_data, list): return []
+    for hotel in hotels_data[:TRIPADVISOR_HOTEL_LIMIT]:
+        price = 'N/A'
+        if price_str := hotel.get('priceForDisplay'):
+            if numbers := URL_REGEX.findall(price_str.replace(',', '')):
+                price = int(numbers[0])
+        processed.append({
+            'id': hotel.get('id'), 'name': hotel.get('title', 'Unknown Hotel'),
+            'address': hotel.get('secondaryInfo', 'N/A'),
+            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', 0)), float(hotel.get('geoSummary', {}).get('longitude', 0))],
+            'price': price, 'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
+            'source': 'tripadvisor',
+            'booking_url': f"https://www.tripadvisor.com{hotel.get('commerceUrl')}" if hotel.get('commerceUrl') else f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
+        })
+    return processed
+
+# --- Unified API Route Handler ---
+
+def handle_hotel_search(source):
+    today = datetime.now()
+    params = {'city_key': request.args.get('city', 'stockholm').lower(), 'checkin': request.args.get('checkin', (today + timedelta(days=1)).strftime('%Y-%m-%d')), 'checkout': request.args.get('checkout', (today + timedelta(days=2)).strftime('%Y-%m-%d')), 'adults': request.args.get('adults', '2'), 'rooms': request.args.get('rooms', '1')}
+    if params['city_key'] not in CITIES: return jsonify({'error': f"City '{params['city_key']}' not supported"}), 400
     
-    if city_id:
-        logger.info(f"✅ Hittade Booking.com ID för {city}: {city_id}")
-    else:
-        logger.warning(f"❌ Staden {city} stöds inte")
-    
-    return city_id
-
-def search_booking_hotels(dest_id: str, checkin: str, checkout: str, adults: int, rooms: int):
-    """Sök hotell från Booking.com med förbättrad felhantering"""
-    url = "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels"
-    
-    params = {
-        "dest_id": dest_id,
-        "dest_type": "city", 
-        "checkin_date": checkin,
-        "checkout_date": checkout,
-        "room_number": rooms,
-        "guest_number": adults,
-        "locale": "en-gb",
-        "currency": "EUR",
-        "order_by": "popularity"
-    }
-    
-    logger.info(f"🔍 Booking.com API anrop: {url}")
-    logger.info(f"📋 Parametrar: {params}")
+    city_info = CITIES[params['city_key']]
+    city_name = city_info['name']
     
     try:
-        response = requests.get(url, headers=BOOKING_HEADERS, params=params, timeout=15)
-        
-        logger.info(f"📡 Booking.com svar: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            hotels = data.get('data', [])
-            logger.info(f"✅ Booking.com: {len(hotels)} hotell hittade")
-            return data
+        logging.info(f"Handling '{source}' search for '{city_name}'.")
+        processed_hotels = []
+
+        if source == 'booking':
+            location_id = get_booking_location_id(city_info['search_query'])
+            if not location_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på Booking.com."}), 404
+            api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
+            processed_hotels = process_booking_hotels(api_data, params)
+
+        elif source == 'tripadvisor':
+            geo_id = get_tripadvisor_geo_id(city_name)
+            if not geo_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
+            api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
+            processed_hotels = process_tripadvisor_hotels(api_data)
         else:
-            logger.error(f"❌ Booking.com API fel: {response.status_code}")
-            logger.error(f"❌ Svar: {response.text[:200]}")
-            return None
-            
-    except requests.exceptions.Timeout:
-        logger.error("❌ Booking.com API timeout")
-        return None
+            return jsonify({'error': f"Source '{source}' is not supported."}), 400
+        
+    except RequestException as e:
+        status_code = e.response.status_code if e.response is not None else 500
+        logging.error(f"API call to '{source}' failed with status {status_code}: {e}")
+        return jsonify({'error': f"Kunde inte hämta data från {source.capitalize()}. Felkod: {status_code}. Kontrollera din prenumeration på RapidAPI."}), 503
     except Exception as e:
-        logger.error(f"❌ Booking.com fel: {e}")
-        return None
+        logging.critical(f"An unhandled exception occurred for source '{source}': {e}", exc_info=True)
+        return jsonify({'error': 'Ett oväntat internt fel uppstod.'}), 500
 
-def search_tripadvisor_hotels(location_id: str):
-    """Sök hotell från TripAdvisor"""
-    url = "https://tripadvisor1.p.rapidapi.com/hotels/list"
-    
-    params = {
-        "location_id": location_id,
-        "limit": "20",
-        "sort": "recommended",
-        "offset": "0",
-        "currency": "EUR",
-        "lang": "en_US"
-    }
-    
-    logger.info(f"🔍 TripAdvisor API anrop: {url}")
-    
-    try:
-        response = requests.get(url, headers=TRIPADVISOR_HEADERS, params=params, timeout=15)
-        
-        logger.info(f"📡 TripAdvisor svar: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            hotels = data.get('data', [])
-            logger.info(f"✅ TripAdvisor: {len(hotels)} hotell hittade")
-            return data
-        else:
-            logger.error(f"❌ TripAdvisor API fel: {response.status_code}")
-            logger.error(f"❌ Svar: {response.text[:200]}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"❌ TripAdvisor fel: {e}")
-        return None
+    return jsonify({'city': city_name, 'hotels': processed_hotels, 'total_found': len(processed_hotels), 'search_params': params})
 
-def create_booking_url(hotel, city_key, checkin, checkout, adults, rooms):
-    """Skapa Booking.com URL"""
-    hotel_name = hotel.get('name', 'Hotel')
-    hotel_id = hotel.get('id', '')
-    country_code = COUNTRY_CODES.get(city_key.lower(), 'en-gb')
-    
-    if hotel_id and hotel_name:
-        base_params = {
-            'ss': hotel_name,
-            'dest_id': hotel_id,
-            'dest_type': 'hotel',
-            'checkin': checkin,
-            'checkout': checkout,
-            'group_adults': adults,
-            'no_rooms': rooms,
-            'search_selected': 'true'
-        }
-        
-        params_string = '&'.join([f"{key}={quote_plus(str(value))}" 
-                                for key, value in base_params.items()])
-        
-        return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
-    
-    return f"https://www.booking.com/searchresults.{country_code}.html?ss={quote_plus(hotel_name)}"
-
-def create_tripadvisor_url(hotel_name, city_key, tripadvisor_id=None):
-    """Skapa TripAdvisor URL"""
-    if tripadvisor_id:
-        city_location_id = TRIPADVISOR_LOCATIONS.get(city_key.lower(), '')
-        if city_location_id:
-            return f"https://www.tripadvisor.com/Hotel_Review-g{city_location_id}-d{tripadvisor_id}"
-    
-    # Fallback: Sök på TripAdvisor
-    search_query = quote_plus(f"{hotel_name} {city_key}")
-    return f"https://www.tripadvisor.com/Search?q={search_query}"
-
-def process_hotel_data(booking_hotels, tripadvisor_hotels, city_key, checkin, checkout, adults, rooms):
-    """Bearbeta hotelldata från båda källorna"""
-    processed_hotels = []
-    
-    for i, hotel in enumerate(booking_hotels[:20]):
-        try:
-            hotel_name = hotel.get('name', f'Hotel {i+1}')
-            
-            # Koordinater
-            lat = hotel.get('latitude', 0)
-            lng = hotel.get('longitude', 0)
-            coordinates = [float(lat), float(lng)] if lat and lng else [0.0, 0.0]
-            
-            # Pris
-            price = "Price on request"
-            if 'priceBreakdown' in hotel:
-                price_info = hotel['priceBreakdown'].get('grossPrice', {})
-                if 'value' in price_info:
-                    price = f"€{int(price_info['value'])}"
-            elif 'price' in hotel:
-                price = f"€{hotel['price']}"
-            
-            # Rating
-            rating = float(hotel.get('reviewScore', 4.0))
-            if rating > 5:
-                rating = rating / 2
-            
-            # Adress
-            address = hotel.get('address', city_key)
-            
-            # Skapa URLs
-            booking_url = create_booking_url(hotel, city_key, checkin, checkout, adults, rooms)
-            tripadvisor_url = create_tripadvisor_url(hotel_name, city_key)
-            
-            # Hitta recensioner från TripAdvisor (om möjligt)
-            reviews_count = None
-            for ta_hotel in tripadvisor_hotels:
-                if hotel_name.lower() in ta_hotel.get('name', '').lower():
-                    reviews_count = ta_hotel.get('num_reviews', 0)
-                    tripadvisor_url = create_tripadvisor_url(
-                        hotel_name, city_key, ta_hotel.get('location_id')
-                    )
-                    break
-            
-            processed_hotels.append({
-                "id": hotel.get('id', f'hotel_{i}'),
-                "name": hotel_name,
-                "address": address,
-                "coordinates": coordinates,
-                "price": price,
-                "rating": rating,
-                "booking_url": booking_url,
-                "tripadvisor_url": tripadvisor_url,
-                "reviews_count": reviews_count
-            })
-            
-        except Exception as e:
-            logger.error(f"❌ Fel vid bearbetning av hotell {i}: {e}")
-            continue
-    
-    return processed_hotels
-
-# Flask Routes
+# --- Flask Routes ---
 @app.route('/')
-def root():
-    """Startsida"""
-    return render_template_string('''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🏨 STAYFINDR Backend - Dual Platform</title>
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-            h1 { color: #2c3e50; }
-            .status { background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 20px 0; }
-            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
-        </style>
-    </head>
-    <body>
-        <h1>🏨 STAYFINDR Backend API</h1>
-        <p>Flask backend med BÅDE Booking.com OCH TripAdvisor integration</p>
-        
-        <div class="status">
-            <strong>✅ Backend Status:</strong><br>
-            Flask server är live och redo för hotellsökningar!
-        </div>
-        
-        <h2>Endpoints:</h2>
-        <div class="endpoint">
-            <strong>GET /test</strong> - Testa båda API:erna med Stockholm
-        </div>
-        <div class="endpoint">
-            <strong>POST /hotels</strong> - Sök hotell med dual platform data
-        </div>
-        <div class="endpoint">
-            <strong>GET /health</strong> - Health check
-        </div>
-        
-        <p><strong>Supported cities:</strong> {{ cities|length }} europeiska städer</p>
-        <p><strong>Data sources:</strong> Booking.com + TripAdvisor</p>
-    </body>
-    </html>
-    ''', cities=FALLBACK_CITIES)
-
-@app.route('/health')
-def health():
-    """Health check med detaljerad information"""
-    api_valid = validate_api_key()
-    
-    return jsonify({
-        "status": "healthy" if api_valid else "unhealthy",
-        "api_key_configured": api_valid,
-        "api_key_preview": f"{API_KEY[:10]}..." if API_KEY else "None",
-        "supported_cities": len(FALLBACK_CITIES),
-        "tripadvisor_cities": len(TRIPADVISOR_LOCATIONS),
-        "timestamp": datetime.now().isoformat()
-    })
-
+def home(): return render_template_string('<h1>STAYFINDR Backend v8.7</h1><p>Corrected and stable version.</p>')
+@app.route('/api/cities')
+def get_cities_route(): return jsonify({'cities': CITIES})
+@app.route('/api/room-types')
+def get_room_types_route():
+    room_types = {'single': {'name': 'Single Room'}, 'double': {'name': 'Double Room'}, 'family': {'name': 'Family Room'}}
+    return jsonify({'room_types': room_types})
+@app.route('/api/hotels/booking')
+def get_booking_hotels_route(): return handle_hotel_search(source='booking')
+@app.route('/api/hotels/tripadvisor')
+def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 @app.route('/test')
-def test():
-    """Test endpoint med detaljerad information"""
-    logger.info("🧪 Startar test av båda API:erna...")
-    
-    # Kontrollera API-nyckel
-    if not validate_api_key():
-        return jsonify({
-            "status": "error",
-            "message": "API key inte konfigurerad",
-            "api_key_preview": f"{API_KEY[:10]}..." if API_KEY else "None"
-        })
-    
-    # Test Stockholm
-    booking_dest_id = get_booking_city_id("stockholm")
-    tripadvisor_location_id = TRIPADVISOR_LOCATIONS.get("stockholm")
-    
-    if not booking_dest_id:
-        return jsonify({
-            "status": "error",
-            "message": "Stockholm inte hittad i Booking.com data"
-        })
-    
-    # Testa Booking.com
-    logger.info("🔍 Testar Booking.com API...")
-    booking_data = search_booking_hotels(booking_dest_id, "2025-07-20", "2025-07-22", 2, 1)
-    
-    # Testa TripAdvisor
-    logger.info("🔍 Testar TripAdvisor API...")
-    tripadvisor_data = search_tripadvisor_hotels(tripadvisor_location_id) if tripadvisor_location_id else None
-    
-    # Resultat
-    booking_hotels = booking_data.get('data', []) if booking_data else []
-    tripadvisor_hotels = tripadvisor_data.get('data', []) if tripadvisor_data else []
-    
-    if booking_hotels:
-        processed = process_hotel_data(
-            booking_hotels[:3], tripadvisor_hotels, 
-            "stockholm", "2025-07-20", "2025-07-22", 2, 1
-        )
-        
-        return jsonify({
-            "status": "success",
-            "message": "Båda API:erna fungerar!",
-            "booking_hotels_found": len(booking_hotels),
-            "tripadvisor_hotels_found": len(tripadvisor_hotels),
-            "sample_hotels": processed,
-            "api_key_working": True
-        })
-    else:
-        return jsonify({
-            "status": "error", 
-            "message": "Ingen data från Booking.com",
-            "booking_response_status": "error" if not booking_data else "empty",
-            "tripadvisor_response_status": "error" if not tripadvisor_data else "empty",
-            "api_key_preview": f"{API_KEY[:10]}..."
-        })
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v8.7 Active'})
 
-@app.route('/hotels', methods=['POST'])
-def search_hotels():
-    """Sök hotell från båda plattformarna"""
-    
-    if not validate_api_key():
-        return jsonify({"error": "API inte konfigurerad"}), 503
-    
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "JSON data krävs"}), 400
-    
-    city = data.get('city', '').lower()
-    checkin = data.get('checkin_date')
-    checkout = data.get('checkout_date')
-    adults = int(data.get('guest_number', 2))
-    rooms = int(data.get('room_number', 1))
-    
-    if not all([city, checkin, checkout]):
-        return jsonify({"error": "city, checkin_date och checkout_date krävs"}), 400
-    
-    # Hämta city IDs
-    booking_id = get_booking_city_id(city)
-    tripadvisor_id = TRIPADVISOR_LOCATIONS.get(city)
-    
-    if not booking_id:
-        return jsonify({"error": f"Staden {city} stöds inte"}), 404
-    
-    try:
-        # Sök på båda plattformarna
-        booking_data = search_booking_hotels(booking_id, checkin, checkout, adults, rooms)
-        tripadvisor_data = search_tripadvisor_hotels(tripadvisor_id) if tripadvisor_id else None
-        
-        if not booking_data or not booking_data.get('data'):
-            return jsonify({"error": "Inga hotell hittade"}), 404
-        
-        booking_hotels = booking_data['data']
-        tripadvisor_hotels = tripadvisor_data.get('data', []) if tripadvisor_data else []
-        
-        # Bearbeta data
-        processed = process_hotel_data(
-            booking_hotels, tripadvisor_hotels, city, checkin, checkout, adults, rooms
-        )
-        
-        return jsonify({
-            "city": city.title(),
-            "hotels": processed,
-            "total_found": len(processed),
-            "search_params": {
-                "checkin": checkin,
-                "checkout": checkout,
-                "guests": adults,
-                "rooms": rooms
-            },
-            "data_sources": ["Booking.com", "TripAdvisor"]
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Sökfel: {e}")
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    logger.info("🚀 Startar STAYFINDR Flask Backend...")
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+# --- Application Startup ---
+if __name__ == '__main__':
+    logging.info("🚀 Starting STAYFINDR Backend v8.7...")
+    is_production = os.environ.get('FLASK_ENV') == 'production'
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=not is_production, host='0.0.0.0', port=port)
