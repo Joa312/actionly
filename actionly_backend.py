@@ -1,8 +1,7 @@
-# STAYFINDR BACKEND v7.7 - Final Stable Version
-# FINAL FIX: Reverted all API calls to the original, user-confirmed working endpoints.
-# This version uses the initial, stable logic of fetching IDs from the CSV and text queries,
-# but retains all the robust error handling and crash-proofing developed in later versions.
-# This should be the definitive, working solution based on the user's API subscriptions.
+# STAYFINDR BACKEND v7.8 - Final Version
+# FINAL FIX: Re-added the missing ROOM_TYPES dictionary and the /api/room-types endpoint.
+# This was the root cause of the empty dropdowns and connection errors.
+# The application logic is now complete and stable.
 
 import os
 import logging
@@ -33,9 +32,17 @@ BOOKING_HOTEL_LIMIT = 20
 TRIPADVISOR_HOTEL_LIMIT = 15
 URL_REGEX = re.compile(r'\d+')
 
+# KORRIGERING: Återställde den saknade ROOM_TYPES-ordlistan
+ROOM_TYPES = {
+    'single': {'name': 'Single Room', 'guests': 1},
+    'double': {'name': 'Double Room', 'guests': 2},
+    'family': {'name': 'Family Room', 'guests': 4},
+    'suite': {'name': 'Suite/Apartment', 'guests': 3}
+}
+
 # --- Data Loading ---
 def load_cities_from_csv(filename='cities.csv'):
-    """Loads cities from CSV. `search_query` and `tripadvisor_id` are now used again."""
+    """Loads cities from CSV. `search_query` and `tripadvisor_id` are used."""
     cities = {}
     try:
         with open(filename, mode='r', encoding='utf-8-sig') as infile:
@@ -64,7 +71,7 @@ CITIES = load_cities_from_csv('cities.csv')
 # --- External API Functions ---
 
 def get_booking_location_id(city_query):
-    """Fetches location ID from the original booking-com18 endpoint."""
+    """Fetches location ID from the booking-com18 endpoint."""
     if not city_query: return None
     url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
     params = {"query": city_query}
@@ -180,19 +187,28 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v7.7</h1><p>Stable version using confirmed API endpoints.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v7.8</h1><p>Final stable version with all endpoints restored.</p>')
+
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
+
+# KORRIGERING: Återställde det saknade endpointet för rumstyper
+@app.route('/api/room-types')
+def get_room_types_route():
+    return jsonify({'room_types': ROOM_TYPES})
+
 @app.route('/api/hotels/booking')
 def get_booking_hotels_route(): return handle_hotel_search(source='booking')
+
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
+
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v7.7 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v7.8 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v7.7...")
+    logging.info("🚀 Starting STAYFINDR Backend v7.8...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
