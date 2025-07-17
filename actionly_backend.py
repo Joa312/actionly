@@ -1,9 +1,7 @@
-# STAYFINDR BACKEND v8.8 - Final TripAdvisor Logic
-# FINAL FIX: Implemented a new, two-step search process for TripAdvisor based on user feedback and API documentation.
-# 1. Dynamically fetch a Geo ID for the city.
-# 2. Search for hotels in that location to get a list and their unique 'contentId'.
-# 3. For each hotel, make a second call to the /hotels/offers endpoint to get pricing data.
-# This aligns with the latest API structure and should resolve the empty results issue permanently.
+# STAYFINDR BACKEND v8.9 - Final Corrected Logic
+# FINAL FIX: Corrected the extraction path for TripAdvisor's 'contentId' based on user-provided documentation.
+# The previous version was looking in the wrong place, causing the two-step search to fail.
+# This version uses the correct, deeply-nested path, which should be the definitive fix.
 
 import os
 import logging
@@ -31,7 +29,7 @@ CORS(app, origins=["https://joa312.github.io", "http://127.0.0.1:5500", "http://
 BOOKING_API_HOST = "booking-com18.p.rapidapi.com"
 TRIPADVISOR_API_HOST = "tripadvisor-com1.p.rapidapi.com"
 BOOKING_HOTEL_LIMIT = 20
-TRIPADVISOR_HOTEL_LIMIT = 15 # Limit how many hotels we fetch offers for
+TRIPADVISOR_HOTEL_LIMIT = 15
 URL_REGEX = re.compile(r'\d+')
 
 # --- Data Loading ---
@@ -142,7 +140,6 @@ def process_tripadvisor_hotel(hotel_summary, offers_data):
     price_str = lowest_price_offer.get('price')
     price = 'N/A'
     if price_str:
-        # Extract number from price string like "$1,234"
         numbers = re.findall(r'\d+', price_str.replace(',', ''))
         if numbers:
             price = int(numbers[0])
@@ -183,8 +180,11 @@ def handle_hotel_search(source):
             
             hotel_list = search_tripadvisor_hotels_list(geo_id)
             for hotel_summary in hotel_list[:TRIPADVISOR_HOTEL_LIMIT]:
-                content_id = hotel_summary.get('id')
-                if not content_id: continue
+                # KORRIGERING: Använder den korrekta, djupt nästlade sökvägen för att hitta contentId.
+                content_id = hotel_summary.get('cardLink', {}).get('route', {}).get('typedParams', {}).get('contentId')
+                if not content_id: 
+                    logging.warning(f"Could not find contentId for hotel: {hotel_summary.get('title')}")
+                    continue
                 try:
                     offers_data = get_tripadvisor_hotel_offers(content_id, params['checkin'], params['checkout'], params['adults'])
                     full_hotel_data = process_tripadvisor_hotel(hotel_summary, offers_data)
@@ -209,7 +209,7 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v8.8</h1><p>Final TripAdvisor logic implemented.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v8.9</h1><p>Final corrected TripAdvisor logic.</p>')
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
 @app.route('/api/room-types')
@@ -221,11 +221,11 @@ def get_booking_hotels_route(): return handle_hotel_search(source='booking')
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v8.8 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v8.9 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v8.8...")
+    logging.info("🚀 Starting STAYFINDR Backend v8.9...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
