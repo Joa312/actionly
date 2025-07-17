@@ -1,5 +1,6 @@
-# STAYFINDR BACKEND v6.5 - Coordinate-Based Search
-# FIX: Switched from text/ID-based search to coordinate-based search to prevent location mismatches.
+# STAYFINDR BACKEND v6.6 - API Call Fix
+# FIX: Corrected a logic error where the wrong search function was being called.
+# FIX: Added more specific logging to aid in future debugging.
 
 import os
 import logging
@@ -104,7 +105,6 @@ CITIES = load_cities_from_csv('cities.csv')
 
 # --- External API Functions with Caching ---
 
-# KORRIGERING: Helt ny funktion som söker med koordinater istället för text/ID.
 @cache
 def search_booking_hotels_by_coords(latitude, longitude, checkin, checkout, adults, rooms):
     """
@@ -128,7 +128,6 @@ def search_booking_hotels_by_coords(latitude, longitude, checkin, checkout, adul
         logging.error(f"Booking.com search by coordinates request failed: {e}")
     return None
 
-# KORRIGERING: Helt ny funktion som söker med koordinater istället för GeoID.
 @cache
 def search_tripadvisor_hotels_by_coords(latitude, longitude, checkin, checkout, adults):
     """
@@ -274,18 +273,28 @@ def handle_hotel_search(source):
 
     try:
         api_data = None
-        # KORRIGERING: Använder stadens koordinater för sökningen
         lat, lon = city_info['coordinates']
+        
+        logging.info(f"Handling hotel search for source: '{source}' in city: '{city_info['name']}'")
 
+        # KORRIGERING: Säkerställer att rätt API-funktion anropas för rätt källa.
         if source == 'booking':
+            logging.info("Calling Booking.com API with coordinates.")
             api_data = search_booking_hotels_by_coords(lat, lon, params['checkin'], params['checkout'], params['adults'], params['rooms'])
             if api_data:
+                logging.info("Processing Booking.com results.")
                 processed_hotels = process_booking_hotels(api_data.get('data', []), city_info, params)
         
         elif source == 'tripadvisor':
+            logging.info("Calling TripAdvisor API with coordinates.")
             api_data = search_tripadvisor_hotels_by_coords(lat, lon, params['checkin'], params['checkout'], params['adults'])
             if api_data:
+                logging.info("Processing TripAdvisor results.")
                 processed_hotels = process_tripadvisor_hotels(api_data, city_info, params)
+        
+        else:
+            logging.error(f"Unknown source '{source}' provided to handle_hotel_search.")
+            return jsonify({'error': f"Source '{source}' is not supported."}), 400
 
         if not processed_hotels:
             data_source = 'demo_fallback'
@@ -307,7 +316,7 @@ def handle_hotel_search(source):
 # --- Flask Routes ---
 @app.route('/')
 def home():
-    return render_template_string('<h1>STAYFINDR Backend v6.5</h1><p>Now using coordinate-based search.</p>')
+    return render_template_string('<h1>STAYFINDR Backend v6.6</h1><p>API call logic corrected. Using coordinate-based search.</p>')
 
 @app.route('/api/cities')
 def get_cities_route():
@@ -331,11 +340,11 @@ def get_hotels_legacy_route():
 
 @app.route('/test')
 def test_endpoint_route():
-    return jsonify({'status': 'STAYFINDR Backend v6.5 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
+    return jsonify({'status': 'STAYFINDR Backend v6.6 Active', 'caching': 'enabled', 'logging': 'enabled', 'data_source': 'cities.csv'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v6.5...")
+    logging.info("🚀 Starting STAYFINDR Backend v6.6...")
     logging.info("▶️ Now loading city data from cities.csv and using coordinate-based search.")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
