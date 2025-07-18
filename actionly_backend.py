@@ -1,6 +1,6 @@
-# STAYFINDR BACKEND v10.2 - CSV Integration with Stockholm Fix
-# Flask backend with RapidAPI Booking.com integration
-# FIXED: Reads all 71 cities from cities.csv + Stockholm location ID fix
+# STAYFINDR BACKEND v11.0 - Dual API Integration
+# Flask backend with Booking.com + TripAdvisor integration
+# FIXED: Real TripAdvisor data + 71 cities from CSV
 
 import os
 import logging
@@ -12,6 +12,8 @@ from flask_cors import CORS
 import requests
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 app = Flask(__name__)
 CORS(app)
@@ -22,35 +24,42 @@ logger = logging.getLogger(__name__)
 
 # RapidAPI Configuration
 RAPIDAPI_KEY = "e1d84ea6ffmsha47402150e4b4a7p1ad726jsn90c5c8f86999"
-RAPIDAPI_HOST = "booking-com18.p.rapidapi.com"
+BOOKING_HOST = "booking-com18.p.rapidapi.com"
+TRIPADVISOR_HOST = "tripadvisor16.p.rapidapi.com"
 
-# Country codes for Booking.com URLs based on city
+# Cache for TripAdvisor location IDs (to avoid repeated API calls)
+TRIPADVISOR_LOCATION_CACHE = {}
+cache_lock = threading.Lock()
+
+# Country codes for Booking.com URLs
 COUNTRY_CODES = {
-    'stockholm': 'sv', 'oslo': 'no', 'helsinki': 'fi', 'copenhagen': 'dk',
+    'stockholm': 'sv', 'gothenburg': 'sv', 'malmo': 'sv',
+    'oslo': 'no', 'bergen': 'no',
+    'helsinki': 'fi', 'tampere': 'fi',
+    'copenhagen': 'dk', 'aarhus': 'dk',
     'paris': 'fr', 'lyon': 'fr', 'nice': 'fr', 'marseille': 'fr', 'bordeaux': 'fr',
     'london': 'en-gb', 'edinburgh': 'en-gb', 'manchester': 'en-gb', 'liverpool': 'en-gb',
-    'amsterdam': 'nl', 'brussels': 'nl', 'rotterdam': 'nl',
-    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es', 'valencia': 'es', 'seville': 'es',
-    'rome': 'it', 'milano': 'it', 'florence': 'it', 'venice': 'it', 'naples': 'it',
+    'amsterdam': 'nl', 'rotterdam': 'nl', 'utrecht': 'nl',
+    'brussels': 'nl', 'antwerp': 'nl',
+    'barcelona': 'es', 'madrid': 'es', 'palma': 'es', 'ibiza': 'es', 
+    'valencia': 'es', 'seville': 'es', 'bilbao': 'es',
+    'rome': 'it', 'milan': 'it', 'florence': 'it', 'venice': 'it', 'naples': 'it',
     'berlin': 'de', 'munich': 'de', 'hamburg': 'de', 'cologne': 'de', 'frankfurt': 'de',
-    'vienna': 'de', 'zurich': 'de', 'geneva': 'fr',
-    'prague': 'cs', 'warsaw': 'pl', 'budapest': 'hu', 'krakow': 'pl',
-    'dublin': 'en-gb', 'lisbon': 'pt', 'porto': 'pt',
+    'vienna': 'de', 'salzburg': 'de',
+    'zurich': 'de', 'geneva': 'fr', 'bern': 'de',
+    'prague': 'cs', 'brno': 'cs',
+    'warsaw': 'pl', 'krakow': 'pl',
+    'budapest': 'hu', 'debrecen': 'hu',
+    'dublin': 'en-gb', 'cork': 'en-gb',
+    'lisbon': 'pt', 'porto': 'pt',
     'athens': 'el', 'santorini': 'el', 'mykonos': 'el', 'thessaloniki': 'el'
 }
 
-# Special location IDs for problematic cities
-SPECIAL_LOCATION_IDS = {
-    'stockholm': '-2960556',  # CRITICAL: Fixed Stockholm location ID
-    # Add more if needed based on testing
-}
-
 def load_cities_from_csv():
-    """Load all cities from cities.csv file with correct column names"""
+    """Load all cities from cities.csv file"""
     cities = {}
     csv_path = 'cities.csv'
     
-    # Check if CSV exists
     if not os.path.exists(csv_path):
         logger.error(f"❌ cities.csv not found at {csv_path}")
         return get_fallback_cities()
@@ -72,11 +81,7 @@ def load_cities_from_csv():
                         'country': row.get('country', '').strip(),
                         'tripadvisor_id': row.get('tripadvisor_id', '').strip()
                     }
-                    
-                    # Add special location ID if it's Stockholm
-                    if city_key == 'stockholm':
-                        cities[city_key]['booking_location_id'] = SPECIAL_LOCATION_IDS['stockholm']
-                        logger.info(f"🔧 Stockholm fix applied: location_id = {SPECIAL_LOCATION_IDS['stockholm']}")
+                    logger.info(f"✅ Loaded city: {city_key} - {cities[city_key]['name']}")
         
         logger.info(f"✅ Loaded {len(cities)} cities from cities.csv")
         return cities
@@ -86,14 +91,12 @@ def load_cities_from_csv():
         return get_fallback_cities()
 
 def get_fallback_cities():
-    """Fallback cities if CSV fails to load"""
-    logger.warning("🔄 Using fallback cities (29 cities)")
+    """Minimal fallback cities if CSV fails"""
     return {
         'stockholm': {
             'name': 'Stockholm, Sweden',
             'coordinates': [59.3293, 18.0686],
-            'search_query': 'Stockholm Sweden',
-            'booking_location_id': '-2960556'  # CRITICAL Stockholm fix
+            'search_query': 'Stockholm Sweden'
         },
         'paris': {
             'name': 'Paris, France', 
@@ -104,62 +107,22 @@ def get_fallback_cities():
             'name': 'London, UK',
             'coordinates': [51.5074, -0.1278],
             'search_query': 'London United Kingdom'
-        },
-        'amsterdam': {
-            'name': 'Amsterdam, Netherlands',
-            'coordinates': [52.3676, 4.9041],
-            'search_query': 'Amsterdam Netherlands'
-        },
-        'barcelona': {
-            'name': 'Barcelona, Spain',
-            'coordinates': [41.3851, 2.1734],
-            'search_query': 'Barcelona Spain'
-        },
-        'rome': {
-            'name': 'Rome, Italy',
-            'coordinates': [41.9028, 12.4964],
-            'search_query': 'Rome Italy'
-        },
-        'berlin': {
-            'name': 'Berlin, Germany',
-            'coordinates': [52.5200, 13.4050],
-            'search_query': 'Berlin Germany'
-        },
-        'copenhagen': {
-            'name': 'Copenhagen, Denmark',
-            'coordinates': [55.6761, 12.5683],
-            'search_query': 'Copenhagen Denmark'
-        },
-        'vienna': {
-            'name': 'Vienna, Austria',
-            'coordinates': [48.2082, 16.3738],
-            'search_query': 'Vienna Austria'
-        },
-        'prague': {
-            'name': 'Prague, Czech Republic',
-            'coordinates': [50.0755, 14.4378],
-            'search_query': 'Prague Czech Republic'
         }
     }
 
 # Load cities at startup
 CITIES = load_cities_from_csv()
 
-def get_location_id(city_info):
-    """Get Booking.com location ID for a city with Stockholm fix"""
-    
-    # CRITICAL FIX: Use hardcoded location_id if available
-    if 'booking_location_id' in city_info:
-        logger.info(f"✅ Using hardcoded location_id: {city_info['booking_location_id']} for {city_info['name']}")
-        return city_info['booking_location_id']
-    
-    # Original API method for other cities
+# === BOOKING.COM API FUNCTIONS ===
+
+def get_booking_location_id(city_info):
+    """Get Booking.com location ID for a city"""
     url = "https://booking-com18.p.rapidapi.com/stays/auto-complete"
     
     querystring = {"query": city_info['search_query'], "languageCode": "en"}
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
+        "x-rapidapi-host": BOOKING_HOST
     }
     
     try:
@@ -168,16 +131,14 @@ def get_location_id(city_info):
             data = response.json()
             if 'data' in data and data['data']:
                 location_id = data['data'][0].get('id')
-                logger.info(f"✅ API location_id: {location_id} for {city_info['name']}")
+                logger.info(f"✅ Booking location_id: {location_id} for {city_info['name']}")
                 return location_id
-        else:
-            logger.error(f"❌ Location API error {response.status_code} for {city_info['name']}")
     except Exception as e:
-        logger.error(f"❌ Location ID error for {city_info['name']}: {e}")
+        logger.error(f"❌ Booking location ID error: {e}")
     
     return None
 
-def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
+def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
     """Search hotels using Booking.com API"""
     url = "https://booking-com18.p.rapidapi.com/stays/search"
     
@@ -192,107 +153,221 @@ def search_hotels_booking_api(location_id, checkin, checkout, adults, rooms):
     
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
+        "x-rapidapi-host": BOOKING_HOST
     }
     
     try:
-        logger.info(f"🔍 Searching hotels for location_id: {location_id}")
         response = requests.get(url, headers=headers, params=querystring)
         if response.status_code == 200:
             data = response.json()
-            logger.info(f"✅ Found {len(data.get('data', []))} hotels")
             return data
-        else:
-            logger.error(f"❌ Hotels API error: {response.status_code}")
     except Exception as e:
-        logger.error(f"❌ Hotels search error: {e}")
+        logger.error(f"❌ Booking hotels search error: {e}")
     
     return None
 
-def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key):
-    """Create hotel name-based booking URL for better targeting"""
+# === TRIPADVISOR API FUNCTIONS ===
+
+def get_tripadvisor_location_id(city_info):
+    """Get TripAdvisor location ID for a city"""
     
-    # Priority 1: Use direct hotel URL from API if available
-    direct_urls = [
-        hotel.get('url'),
-        hotel.get('link'), 
-        hotel.get('booking_url'),
-        hotel.get('hotelUrl'),
-        hotel.get('deepLink')
-    ]
+    # Check cache first
+    city_name = city_info['name']
+    with cache_lock:
+        if city_name in TRIPADVISOR_LOCATION_CACHE:
+            logger.info(f"📦 Using cached TripAdvisor location ID for {city_name}")
+            return TRIPADVISOR_LOCATION_CACHE[city_name]
     
-    for url in direct_urls:
-        if url and 'booking.com' in str(url):
-            # Add search parameters to direct URL
-            if '?' in url:
-                return f"{url}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    url = "https://tripadvisor16.p.rapidapi.com/api/v1/hotels/searchLocation"
+    
+    querystring = {"query": city_info['search_query'].split(',')[0]}  # Just city name
+    
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": TRIPADVISOR_HOST
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=querystring)
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and data['data']:
+                location_id = data['data'][0].get('geoId')
+                logger.info(f"✅ TripAdvisor location_id: {location_id} for {city_name}")
+                
+                # Cache the result
+                with cache_lock:
+                    TRIPADVISOR_LOCATION_CACHE[city_name] = location_id
+                
+                return location_id
+    except Exception as e:
+        logger.error(f"❌ TripAdvisor location ID error: {e}")
+    
+    return None
+
+def search_tripadvisor_hotels(location_id, checkin, checkout, adults, rooms):
+    """Search hotels using TripAdvisor API"""
+    url = "https://tripadvisor16.p.rapidapi.com/api/v1/hotels/searchHotels"
+    
+    querystring = {
+        "geoId": location_id,
+        "checkIn": checkin,
+        "checkOut": checkout,
+        "pageNumber": "1",
+        "currencyCode": "EUR"
+    }
+    
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": TRIPADVISOR_HOST
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=querystring, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return data
+        else:
+            logger.error(f"❌ TripAdvisor API returned {response.status_code}")
+    except Exception as e:
+        logger.error(f"❌ TripAdvisor hotels search error: {e}")
+    
+    return None
+
+def process_tripadvisor_hotels(hotels_data, city_info, checkin, checkout, adults, rooms, city_key):
+    """Process TripAdvisor hotel data to match our format"""
+    processed_hotels = []
+    
+    # Extract hotels from TripAdvisor response structure
+    hotels = hotels_data.get('data', {}).get('data', [])
+    
+    for i, hotel in enumerate(hotels[:20]):  # Limit to 20 hotels
+        try:
+            # Extract hotel name
+            hotel_name = hotel.get('title', 'Unknown Hotel')
+            
+            # Extract coordinates
+            latitude = hotel.get('latitude')
+            longitude = hotel.get('longitude')
+            
+            if latitude and longitude:
+                coordinates = [float(latitude), float(longitude)]
             else:
-                return f"{url}?checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+                # Fallback to city center
+                coordinates = city_info['coordinates']
+            
+            # Extract price
+            price = 'N/A'
+            price_details = hotel.get('priceDetails', {})
+            if price_details:
+                display_price = price_details.get('displayPrice', {})
+                if isinstance(display_price, dict):
+                    price_str = display_price.get('string', '')
+                elif isinstance(display_price, str):
+                    price_str = display_price
+                else:
+                    price_str = ''
+                
+                # Extract numeric price
+                if price_str:
+                    import re
+                    numbers = re.findall(r'\d+', price_str.replace(',', ''))
+                    if numbers:
+                        price = int(numbers[0])
+            
+            # Extract rating
+            rating = 4.0  # Default
+            rating_info = hotel.get('bubbleRating', {})
+            if rating_info:
+                rating = float(rating_info.get('rating', 4.0))
+            
+            # Extract review count
+            reviews_count = hotel.get('reviewCount', 0)
+            
+            # Build TripAdvisor URL
+            hotel_id = hotel.get('id', '')
+            tripadvisor_url = f"https://www.tripadvisor.com/Hotel_Review-g{hotel_id}.html"
+            
+            # Create booking search URL
+            country_code = COUNTRY_CODES.get(city_key, 'en-gb')
+            booking_url = f"https://www.booking.com/searchresults.{country_code}.html?ss={quote_plus(hotel_name)}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+            
+            processed_hotel = {
+                'id': f"ta_{hotel.get('id', i)}",
+                'name': hotel_name,
+                'address': hotel.get('address', city_info['name']),
+                'coordinates': coordinates,
+                'price': price,
+                'rating': rating,
+                'reviews_count': reviews_count,
+                'booking_url': booking_url,
+                'tripadvisor_url': tripadvisor_url,
+                'source': 'tripadvisor',
+                'provider_rank': hotel.get('rank', i + 1)
+            }
+            
+            processed_hotels.append(processed_hotel)
+            
+        except Exception as e:
+            logger.error(f"Error processing TripAdvisor hotel {i}: {e}")
+            continue
     
-    # Priority 2: Create hotel name-based search URL
-    hotel_id = hotel.get('id') or hotel.get('hotel_id') or hotel.get('propertyId')
+    return processed_hotels
+
+def create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key):
+    """Create hotel booking URL"""
+    # Get hotel name and ID
+    hotel_id = hotel.get('id') or hotel.get('hotel_id')
     hotel_name = hotel.get('name', 'Hotel')
     
-    if hotel_id and hotel_name:
-        # Get country code for the city
-        country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-        
-        # Encode hotel name properly for URL
-        hotel_name_encoded = quote_plus(hotel_name)
-        
-        # Create hotel name-based search URL
-        base_params = {
-            'ss': hotel_name,
-            'dest_id': hotel_id,
-            'dest_type': 'hotel',
-            'checkin': checkin,
-            'checkout': checkout,
-            'group_adults': adults,
-            'no_rooms': rooms,
-            'group_children': 0,
-            'search_selected': 'true'
-        }
-        
-        # Build URL parameters
-        params_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in base_params.items()])
-        
-        return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
-    
-    # Priority 3: Fallback to generic search
+    # Get country code
     country_code = COUNTRY_CODES.get(city_key, 'en-gb')
-    return f"https://www.booking.com/searchresults.{country_code}.html?ss={city_info['name']}&checkin={checkin}&checkout={checkout}&group_adults={adults}&no_rooms={rooms}"
+    
+    # Create search URL with hotel name
+    base_params = {
+        'ss': hotel_name,
+        'checkin': checkin,
+        'checkout': checkout,
+        'group_adults': adults,
+        'no_rooms': rooms,
+        'search_selected': 'true'
+    }
+    
+    if hotel_id:
+        base_params['dest_id'] = hotel_id
+        base_params['dest_type'] = 'hotel'
+    
+    params_string = '&'.join([f"{key}={quote_plus(str(value))}" for key, value in base_params.items()])
+    
+    return f"https://www.booking.com/searchresults.{country_code}.html?{params_string}"
 
-def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms, city_key):
-    """Process and format hotel data with proper booking URLs"""
+def process_booking_hotels(hotels_data, city_info, checkin, checkout, adults, rooms, city_key):
+    """Process Booking.com hotel data"""
     processed_hotels = []
     
     for i, hotel in enumerate(hotels_data):
-        # Extract hotel information
+        # Skip problematic Stockholm hotel in Germany
         hotel_name = hotel.get('name', 'Unknown Hotel')
+        if city_key == 'stockholm' and 'stockholm' in hotel_name.lower() and len(hotel_name.split()) == 1:
+            logger.warning(f"🔧 Filtering out German hotel 'Stockholm'")
+            continue
         
-        # Get real coordinates if available, otherwise use city center with offset
+        # Extract coordinates
         latitude = hotel.get('latitude')
         longitude = hotel.get('longitude')
         
         if latitude and longitude:
             coordinates = [float(latitude), float(longitude)]
         else:
-            # Use city center coordinates
-            base_lat, base_lng = city_info['coordinates']
-            coordinates = [
-                base_lat + (i * 0.01) - 0.05,
-                base_lng + (i * 0.01) - 0.05
-            ]
+            coordinates = city_info['coordinates']
         
-        # Extract pricing information
+        # Extract price
         price = 'N/A'
         if 'priceBreakdown' in hotel:
             price_info = hotel['priceBreakdown'].get('grossPrice', {})
             if 'value' in price_info:
                 total_price = price_info['value']
                 try:
-                    # Estimate per night
-                    from datetime import datetime
                     checkin_date = datetime.strptime(checkin, '%Y-%m-%d')
                     checkout_date = datetime.strptime(checkout, '%Y-%m-%d')
                     nights = (checkout_date - checkin_date).days
@@ -301,105 +376,100 @@ def process_hotel_data(hotels_data, city_info, checkin, checkout, adults, rooms,
                     else:
                         price = total_price
                 except:
-                    price = int(total_price / 7)  # Fallback: assume 7 nights
-        elif 'price' in hotel:
-            price = hotel['price']
+                    price = int(total_price / 7)
         
         # Extract rating
-        rating = hotel.get('reviewScore', hotel.get('rating', 4.0))
+        rating = hotel.get('reviewScore', 4.0)
         if rating:
-            rating = float(rating) / 2 if rating > 5 else float(rating)  # Normalize to 5-point scale
-        else:
-            rating = 4.0
+            rating = float(rating) / 2 if rating > 5 else float(rating)
         
-        # Extract address
-        address = hotel.get('address', city_info['name'])
-        
-        # Create optimized booking URL with hotel name
+        # Create booking URL
         booking_url = create_booking_url(hotel, city_info, checkin, checkout, adults, rooms, city_key)
         
         processed_hotel = {
-            'id': hotel.get('id') or hotel.get('hotel_id') or f"hotel_{i}",
+            'id': f"bk_{hotel.get('id', i)}",
             'name': hotel_name,
-            'address': address,
+            'address': hotel.get('address', city_info['name']),
             'coordinates': coordinates,
             'price': price,
             'rating': rating,
             'booking_url': booking_url,
-            'source': 'booking.com',
-            'tripadvisor_url': None
+            'source': 'booking',
+            'provider_rank': i + 1
         }
         
         processed_hotels.append(processed_hotel)
     
-    return processed_hotels
+    return processed_hotels[:20]  # Limit to 20 hotels
+
+# === API ENDPOINTS ===
 
 @app.route('/')
 def home():
     """API Documentation Page"""
     total_cities = len(CITIES)
-    cities_source = "cities.csv" if total_cities > 30 else "fallback"
     
     return render_template_string('''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🏨 STAYFINDR Backend API v10.2</title>
+        <title>🏨 STAYFINDR Backend API v11.0</title>
         <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+            body { font-family: Arial, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
             h1 { color: #2c3e50; }
             .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; }
-            .cities { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0; }
-            .city { background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center; font-size: 0.9rem; }
+            .new { background: #d4edda; border-left: 4px solid #28a745; }
             .feature { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 8px; }
-            .fix { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #ffc107; }
-            .csv-info { background: #d1ecf1; padding: 10px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #bee5eb; }
+            .status { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #ffc107; }
         </style>
     </head>
     <body>
-        <h1>🏨 STAYFINDR Backend API v10.2</h1>
-        <p>Flask backend for European hotel search with CSV integration</p>
+        <h1>🏨 STAYFINDR Backend API v11.0</h1>
+        <p>Dual API Integration: Booking.com + TripAdvisor</p>
         
-        <div class="csv-info">
-            <strong>📊 v10.2 UPDATE: CSV Integration</strong><br>
-            Loading {{total_cities}} cities from {{cities_source}}<br>
-            Stockholm location ID: -2960556 (hardcoded fix)
+        <div class="status">
+            <strong>🎯 v11.0 Features:</strong><br>
+            ✅ Real TripAdvisor API integration (no more mock data!)<br>
+            ✅ Parallel search from both Booking.com and TripAdvisor<br>
+            ✅ {{total_cities}} European cities supported<br>
+            ✅ Intelligent caching for better performance
         </div>
         
-        <div class="fix">
-            <strong>🔧 Stockholm Location ID Fixed</strong><br>
-            No more German hotel results for Stockholm searches
+        <h2>API Endpoints:</h2>
+        
+        <div class="endpoint new">
+            <strong>/api/hotels/dual</strong> - Get hotels from BOTH sources<br>
+            Combines Booking.com + TripAdvisor results<br>
+            <em>Returns up to 40 hotels (20 from each source)</em>
         </div>
         
-        <div class="feature">
-            <strong>✅ Hotel Name-Based Booking URLs</strong><br>
-            CTA buttons use hotel names for better targeting and SEO
-        </div>
-        
-        <h2>Available endpoints:</h2>
         <div class="endpoint">
-            <strong>/api/hotels/booking</strong> - Get Booking.com hotels for a city<br>
-            Parameters: city, checkin, checkout, adults, rooms<br>
-            <em>All {{total_cities}} cities supported!</em>
+            <strong>/api/hotels/booking</strong> - Booking.com hotels only<br>
+            Parameters: city, checkin, checkout, adults, rooms
         </div>
+        
+        <div class="endpoint">
+            <strong>/api/hotels/tripadvisor</strong> - TripAdvisor hotels only<br>
+            Parameters: city, checkin, checkout, adults, rooms
+        </div>
+        
         <div class="endpoint">
             <strong>/api/cities</strong> - List all {{total_cities}} cities
         </div>
+        
         <div class="endpoint">
-            <strong>/test</strong> - Test Stockholm hotels (fixed)
+            <strong>/test</strong> - Test dual API with Stockholm
         </div>
         
-        <h2>Cities supported ({{total_cities}} total):</h2>
-        <div class="cities">
-            {% for city in cities %}
-            <div class="city">{{ city }}</div>
-            {% endfor %}
+        <div class="feature">
+            <strong>Performance Features:</strong><br>
+            • Location ID caching reduces API calls<br>
+            • Parallel API requests for faster results<br>
+            • Automatic fallback if one API fails
         </div>
-        
-        <p><strong>Status:</strong> {{total_cities}} cities loaded from {{cities_source}} - Stockholm fix active!</p>
     </body>
     </html>
-    ''', cities=list(CITIES.keys())[:40], total_cities=total_cities, cities_source=cities_source)
+    ''', total_cities=total_cities)
 
 @app.route('/api/cities')
 def get_cities():
@@ -407,15 +477,15 @@ def get_cities():
     return jsonify({
         'cities': CITIES,
         'total': len(CITIES),
-        'source': 'cities.csv' if len(CITIES) > 30 else 'fallback'
+        'source': 'cities.csv'
     })
 
 @app.route('/api/hotels/booking')
-def get_hotels():
-    """Get Booking.com hotels for a specific city with Stockholm fix"""
+def get_booking_hotels():
+    """Get only Booking.com hotels"""
     city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', '2025-07-18')
-    checkout = request.args.get('checkout', '2025-07-19')
+    checkin = request.args.get('checkin', '2025-07-20')
+    checkout = request.args.get('checkout', '2025-07-21')
     adults = request.args.get('adults', '2')
     rooms = request.args.get('rooms', '1')
     
@@ -424,21 +494,19 @@ def get_hotels():
     
     city_info = CITIES[city]
     
-    # Get location ID (with Stockholm fix)
-    location_id = get_location_id(city_info)
-    
+    # Get Booking.com location ID
+    location_id = get_booking_location_id(city_info)
     if not location_id:
-        return jsonify({'error': f'Could not find location ID for {city}'}), 404
+        return jsonify({'error': f'Could not find Booking.com location for {city}'}), 404
     
     # Search hotels
-    hotels_data = search_hotels_booking_api(location_id, checkin, checkout, adults, rooms)
-    
+    hotels_data = search_booking_hotels(location_id, checkin, checkout, adults, rooms)
     if not hotels_data or 'data' not in hotels_data:
-        return jsonify({'error': 'No hotels found'}), 404
+        return jsonify({'error': 'No hotels found on Booking.com'}), 404
     
-    # Process hotel data - limit to top 50
-    processed_hotels = process_hotel_data(
-        hotels_data['data'][:50], 
+    # Process hotels
+    processed_hotels = process_booking_hotels(
+        hotels_data['data'][:20], 
         city_info, 
         checkin, 
         checkout, 
@@ -455,23 +523,17 @@ def get_hotels():
             'checkin': checkin,
             'checkout': checkout, 
             'adults': adults,
-            'rooms': rooms,
-            'city_key': city
+            'rooms': rooms
         },
-        'data_source': 'booking',
-        'stockholm_fix': 'enabled' if city == 'stockholm' else 'not_needed',
-        'location_id_used': location_id,
-        'csv_loaded': len(CITIES) > 30,
-        'total_cities_available': len(CITIES),
-        'url_type': 'hotel_name_based'
+        'data_source': 'booking'
     })
 
 @app.route('/api/hotels/tripadvisor')
 def get_tripadvisor_hotels():
-    """Get TripAdvisor hotels (mock data fallback)"""
+    """Get only TripAdvisor hotels"""
     city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', '2025-07-18')
-    checkout = request.args.get('checkout', '2025-07-19')
+    checkin = request.args.get('checkin', '2025-07-20')
+    checkout = request.args.get('checkout', '2025-07-21')
     adults = request.args.get('adults', '2')
     rooms = request.args.get('rooms', '1')
     
@@ -480,96 +542,159 @@ def get_tripadvisor_hotels():
     
     city_info = CITIES[city]
     
-    # Mock TripAdvisor data for demonstration
-    mock_hotels = generate_mock_tripadvisor_data(city_info, checkin, checkout, adults, rooms)
+    # Get TripAdvisor location ID
+    location_id = get_tripadvisor_location_id(city_info)
+    if not location_id:
+        return jsonify({'error': f'Could not find TripAdvisor location for {city}'}), 404
+    
+    # Search hotels
+    hotels_data = search_tripadvisor_hotels(location_id, checkin, checkout, adults, rooms)
+    if not hotels_data:
+        return jsonify({'error': 'No hotels found on TripAdvisor'}), 404
+    
+    # Process hotels
+    processed_hotels = process_tripadvisor_hotels(
+        hotels_data, 
+        city_info, 
+        checkin, 
+        checkout, 
+        adults, 
+        rooms,
+        city
+    )
     
     return jsonify({
         'city': city_info['name'],
-        'hotels': mock_hotels,
-        'total_found': len(mock_hotels),
+        'hotels': processed_hotels,
+        'total_found': len(processed_hotels),
         'search_params': {
             'checkin': checkin,
             'checkout': checkout, 
             'adults': adults,
-            'rooms': rooms,
-            'city_key': city
+            'rooms': rooms
         },
         'data_source': 'tripadvisor'
     })
 
 @app.route('/api/hotels/dual')
 def get_dual_hotels():
-    """Get hotels from both Booking.com and TripAdvisor"""
+    """Get hotels from BOTH Booking.com and TripAdvisor"""
     city = request.args.get('city', 'stockholm')
-    checkin = request.args.get('checkin', '2025-07-18')
-    checkout = request.args.get('checkout', '2025-07-19')
+    checkin = request.args.get('checkin', '2025-07-20')
+    checkout = request.args.get('checkout', '2025-07-21')
     adults = request.args.get('adults', '2')
     rooms = request.args.get('rooms', '1')
     
     if city not in CITIES:
         return jsonify({'error': f'City {city} not supported'}), 400
     
-    # Get Booking.com hotels
-    booking_response = get_hotels()
-    if booking_response.status_code != 200:
-        # Fallback to mock data if Booking.com fails
-        city_info = CITIES[city]
-        mock_hotels = generate_mock_tripadvisor_data(city_info, checkin, checkout, adults, rooms)
-        return jsonify({
-            'city': city_info['name'],
-            'hotels': mock_hotels,
-            'total_found': len(mock_hotels),
-            'search_params': {
-                'checkin': checkin,
-                'checkout': checkout, 
-                'adults': adults,
-                'rooms': rooms,
-                'city_key': city
-            },
-            'data_source': 'dual_fallback'
-        })
+    city_info = CITIES[city]
+    all_hotels = []
+    errors = []
     
-    # Return Booking.com data with dual source indicator
-    booking_data = booking_response.get_json()
-    booking_data['data_source'] = 'dual'
-    return jsonify(booking_data)
+    # Use ThreadPoolExecutor for parallel API calls
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        # Submit both API calls
+        booking_future = executor.submit(
+            fetch_booking_hotels, 
+            city_info, city, checkin, checkout, adults, rooms
+        )
+        tripadvisor_future = executor.submit(
+            fetch_tripadvisor_hotels,
+            city_info, city, checkin, checkout, adults, rooms
+        )
+        
+        # Get Booking.com results
+        try:
+            booking_hotels = booking_future.result(timeout=10)
+            all_hotels.extend(booking_hotels)
+            logger.info(f"✅ Got {len(booking_hotels)} hotels from Booking.com")
+        except Exception as e:
+            logger.error(f"❌ Booking.com error: {e}")
+            errors.append(f"Booking.com: {str(e)}")
+        
+        # Get TripAdvisor results
+        try:
+            tripadvisor_hotels = tripadvisor_future.result(timeout=10)
+            all_hotels.extend(tripadvisor_hotels)
+            logger.info(f"✅ Got {len(tripadvisor_hotels)} hotels from TripAdvisor")
+        except Exception as e:
+            logger.error(f"❌ TripAdvisor error: {e}")
+            errors.append(f"TripAdvisor: {str(e)}")
+    
+    # Sort by rating (best first)
+    all_hotels.sort(key=lambda x: x.get('rating', 0), reverse=True)
+    
+    return jsonify({
+        'city': city_info['name'],
+        'hotels': all_hotels,
+        'total_found': len(all_hotels),
+        'search_params': {
+            'checkin': checkin,
+            'checkout': checkout, 
+            'adults': adults,
+            'rooms': rooms
+        },
+        'data_source': 'dual',
+        'sources': {
+            'booking': len([h for h in all_hotels if h['source'] == 'booking']),
+            'tripadvisor': len([h for h in all_hotels if h['source'] == 'tripadvisor'])
+        },
+        'errors': errors if errors else None
+    })
 
-def generate_mock_tripadvisor_data(city_info, checkin, checkout, adults, rooms):
-    """Generate mock TripAdvisor data for demonstration"""
-    base_hotels = [
-        {'name': f'Hotel Frantz {city_info["name"].split(",")[0]}', 'price': 152, 'rating': 4.2},
-        {'name': f'Scandic Continental', 'price': 189, 'rating': 4.4},
-        {'name': f'Grand Hotel {city_info["name"].split(",")[0]}', 'price': 445, 'rating': 4.8}
-    ]
+def fetch_booking_hotels(city_info, city_key, checkin, checkout, adults, rooms):
+    """Helper function to fetch Booking.com hotels"""
+    location_id = get_booking_location_id(city_info)
+    if not location_id:
+        raise Exception(f"No Booking.com location ID for {city_info['name']}")
     
-    mock_hotels = []
-    for i, hotel in enumerate(base_hotels):
-        mock_hotels.append({
-            'id': f'mock_{city_info["name"].split(",")[0].lower()}_{i}',
-            'name': hotel['name'],
-            'address': city_info['name'],
-            'coordinates': [city_info['coordinates'][0], city_info['coordinates'][1] + (i * 0.01)],
-            'price': hotel['price'],
-            'rating': hotel['rating'],
-            'reviews_count': 1250 + (i * 500),
-            'booking_url': f'https://www.booking.com/searchresults.html?ss={hotel["name"].replace(" ", "+")}',
-            'tripadvisor_url': f'https://www.tripadvisor.com/Search?q={hotel["name"].replace(" ", "+")}',
-            'source': 'mock_data'
-        })
+    hotels_data = search_booking_hotels(location_id, checkin, checkout, adults, rooms)
+    if not hotels_data or 'data' not in hotels_data:
+        return []
     
-    return mock_hotels
+    return process_booking_hotels(
+        hotels_data['data'][:20],
+        city_info,
+        checkin,
+        checkout,
+        adults,
+        rooms,
+        city_key
+    )
+
+def fetch_tripadvisor_hotels(city_info, city_key, checkin, checkout, adults, rooms):
+    """Helper function to fetch TripAdvisor hotels"""
+    location_id = get_tripadvisor_location_id(city_info)
+    if not location_id:
+        raise Exception(f"No TripAdvisor location ID for {city_info['name']}")
+    
+    hotels_data = search_tripadvisor_hotels(location_id, checkin, checkout, adults, rooms)
+    if not hotels_data:
+        return []
+    
+    return process_tripadvisor_hotels(
+        hotels_data,
+        city_info,
+        checkin,
+        checkout,
+        adults,
+        rooms,
+        city_key
+    )
 
 @app.route('/test')
-def test_stockholm():
-    """Test endpoint with Stockholm hotels (should now show Swedish hotels)"""
-    return get_hotels()
+def test_dual():
+    """Test endpoint with Stockholm hotels from both sources"""
+    return get_dual_hotels()
 
 if __name__ == '__main__':
-    print("🚀 Starting STAYFINDR Backend v10.2...")
+    print("🚀 Starting STAYFINDR Backend v11.0...")
     print(f"📊 Loaded {len(CITIES)} cities from CSV")
-    print("🔧 Stockholm location ID fix enabled")
-    print("🌍 Hotel name-based booking URLs")
-    print("✅ Ready to serve all European cities!")
+    print("🔧 Dual API integration: Booking.com + TripAdvisor")
+    print("✅ Real TripAdvisor data - no more mocks!")
+    print("⚡ Parallel API calls for better performance")
+    print("🌍 Ready to serve all European cities!")
     
     # Use PORT environment variable for deployment
     port = int(os.environ.get('PORT', 5000))
