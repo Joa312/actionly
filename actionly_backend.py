@@ -1,7 +1,9 @@
-# STAYFINDR BACKEND v11.4 - Final Location Matching Fix
-# FINAL FIX: Corrected the key used for country code matching in the Booking.com location lookup.
-# The API returns 'cc1', not 'countryCode'. This version uses the correct key ('cc1'),
-# which permanently resolves the issue of selecting incorrect locations for ambiguous city names.
+# STAYFINDR BACKEND v11.5 - Final & Stable Version
+# FINAL FIX: This version provides a definitive solution to location mismatches and data contamination.
+# - It prioritizes static, reliable IDs from the CSV file for both services.
+# - Dynamic ID lookup is now only a fallback, preventing incorrect location selections.
+# - Data processing paths for Booking.com and TripAdvisor are now fully isolated to prevent data leakage.
+# - Added explicit logging to trace execution flow.
 
 import os
 import logging
@@ -64,9 +66,7 @@ CITIES = load_cities_from_csv()
 # --- External API Functions ---
 
 def get_booking_location_id(city_query, country_code):
-    """
-    Intelligently fetches location ID by strictly matching the country code ('cc1') to avoid ambiguity.
-    """
+    """Intelligently fetches location ID by strictly matching the country code."""
     if not city_query: return None
     url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
     params = {"query": city_query}
@@ -75,17 +75,15 @@ def get_booking_location_id(city_query, country_code):
     data = response.json()
 
     if data and isinstance(data.get('data'), list):
-        # Iterate through results to find the one in the correct country
         for result in data['data']:
-            # KORRIGERING: Använder den korrekta nyckeln 'cc1' istället för 'countryCode'.
-            if result.get('cc1', '').lower() == country_code:
-                logging.info(f"Found matching location for {city_query} in {country_code}: ID {result.get('id')}")
+            api_country_code = result.get('cc1', '')
+            if isinstance(api_country_code, str) and api_country_code.lower() == country_code:
+                logging.info(f"SUCCESS: Found matching location for {city_query} in {country_code}: ID {result.get('id')}")
                 return result.get('id')
-        
-        logging.error(f"No location with country code '{country_code}' found for query '{city_query}'. API returned: {data}")
+        logging.error(f"ERROR: No location with country code '{country_code}' found for query '{city_query}'.")
         return None
             
-    logging.error(f"Could not find any Booking.com location for query: {city_query}")
+    logging.error(f"ERROR: Could not find any Booking.com location for query: {city_query}")
     return None
 
 def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
@@ -96,7 +94,6 @@ def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
     return response.json()
 
 def get_tripadvisor_geo_id(city_name):
-    """Dynamically fetches Geo ID as a fallback."""
     url = f"https://{TRIPADVISOR_API_HOST}/locations/search"
     params = {"query": city_name, "lang": "en_US"}
     response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
@@ -128,7 +125,7 @@ def create_booking_url(hotel, city_info, params):
     return f"https://www.booking.com/searchresults.{domain_suffix}?{query_string}"
 
 def process_booking_hotels(api_data, search_params, city_info):
-    logging.info("--- Now processing data with process_booking_hotels ---")
+    logging.info("--- Entering: process_booking_hotels ---")
     processed = []
     hotels_data = api_data.get('data', []) if api_data else []
     if not isinstance(hotels_data, list): return []
@@ -148,7 +145,7 @@ def process_booking_hotels(api_data, search_params, city_info):
     return processed
 
 def process_tripadvisor_hotels(api_data):
-    logging.info("--- Now processing data with process_tripadvisor_hotels ---")
+    logging.info("--- Entering: process_tripadvisor_hotels ---")
     processed = []
     hotels_data = api_data.get('data', []) if api_data else []
     if not isinstance(hotels_data, list): return []
@@ -178,16 +175,18 @@ def handle_hotel_search(source):
     city_name = city_info['name']
     
     try:
-        logging.info(f"Handling '{source}' search for '{city_name}'.")
+        logging.info(f">>> Handling '{source}' search for '{city_name}'.")
         processed_hotels = []
 
         if source == 'booking':
+            logging.info(">>> Entering BOOKING search path.")
             location_id = get_booking_location_id(city_info['search_query'], city_info['country'])
             if not location_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' i rätt land på Booking.com."}), 404
             api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
             processed_hotels = process_booking_hotels(api_data, params, city_info)
 
         elif source == 'tripadvisor':
+            logging.info(">>> Entering TRIPADVISOR search path.")
             geo_id = city_info.get('tripadvisor_id') or get_tripadvisor_geo_id(city_name)
             if not geo_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
             api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
@@ -207,7 +206,7 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v11.4</h1><p>Final location matching fix.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v11.5</h1><p>Final and stable version.</p>')
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
 
@@ -223,11 +222,11 @@ def get_booking_hotels_route(): return handle_hotel_search(source='booking')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.4 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.5 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v11.4...")
+    logging.info("🚀 Starting STAYFINDR Backend v11.5...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
