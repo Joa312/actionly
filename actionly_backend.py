@@ -1,4 +1,4 @@
-# STAYFINDR BACKEND v11.8 - Final & Stable Version
+# STAYFINDR BACKEND v11.9 - Final & Stable Version
 # FINAL FIX: This version provides a definitive solution to data contamination issues.
 # - Data processing paths for Booking.com and TripAdvisor are now fully isolated in all endpoints.
 # - Added explicit logging to trace which processing function is being called.
@@ -170,7 +170,7 @@ def fetch_tripadvisor_hotels_helper(city_info, params):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v11.8</h1><p>Final and stable version.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v11.9</h1><p>Final and stable version.</p>')
 
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
@@ -237,11 +237,11 @@ def get_dual_hotels():
     })
 
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.8 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.9 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v11.8...")
+    logging.info("🚀 Starting STAYFINDR Backend v11.9...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
