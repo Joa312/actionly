@@ -1,9 +1,8 @@
-# STAYFINDR BACKEND v11.6 - Completed & Corrected
-# FINAL VERSION: This file completes the user's legacy code by merging it with the latest stable logic.
-# - Uses correct, modern API hosts (booking-com18, tripadvisor-com1).
-# - Implements fully dynamic and intelligent ID lookups for both services.
-# - Retains the parallel search structure for the /dual endpoint.
-# - Cleans up all legacy functions and provides robust error handling.
+# STAYFINDR BACKEND v11.7 - Final Corrected Logic
+# FINAL VERSION: This version is a complete rewrite of the TripAdvisor logic to match the user-provided API response.
+# - Uses the correct, legacy API host (tripadvisor16.p.rapidapi.com).
+# - Correctly parses the new, complex data structure for hotel details, including price and booking URL.
+# - Retains the stable, intelligent search for Booking.com.
 
 import os
 import logging
@@ -30,7 +29,7 @@ CORS(app, origins=["https://joa312.github.io", "http://127.0.0.1:5500", "http://
 
 # --- API & Data Constants ---
 BOOKING_API_HOST = "booking-com18.p.rapidapi.com"
-TRIPADVISOR_API_HOST = "tripadvisor-com1.p.rapidapi.com"
+TRIPADVISOR_API_HOST = "tripadvisor16.p.rapidapi.com" # Using the confirmed working host
 BOOKING_HOTEL_LIMIT = 20
 TRIPADVISOR_HOTEL_LIMIT = 15
 URL_REGEX = re.compile(r'\d+')
@@ -51,6 +50,7 @@ def load_cities_from_csv(filename='cities.csv'):
                     'name': row.get('name', 'N/A').replace('"', '').strip(),
                     'search_query': row.get('search_query', ''),
                     'country': row.get('country', 'com').lower(),
+                    'tripadvisor_id': row.get('tripadvisor_id', '')
                 }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
@@ -73,17 +73,11 @@ def get_booking_location_id(city_query, country_code):
     response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": BOOKING_API_HOST}, params=params, timeout=10)
     response.raise_for_status()
     data = response.json()
-
     if data and isinstance(data.get('data'), list):
         for result in data['data']:
             api_country_code = result.get('cc1', '')
             if isinstance(api_country_code, str) and api_country_code.lower() == country_code:
-                logging.info(f"SUCCESS: Found matching location for {city_query} in {country_code}: ID {result.get('id')}")
                 return result.get('id')
-        logging.error(f"ERROR: No location with country code '{country_code}' found for query '{city_query}'.")
-        return None
-            
-    logging.error(f"ERROR: Could not find any Booking.com location for query: {city_query}")
     return None
 
 def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
@@ -93,22 +87,10 @@ def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
     response.raise_for_status()
     return response.json()
 
-def get_tripadvisor_geo_id(city_name):
-    url = f"https://{TRIPADVISOR_API_HOST}/locations/search"
-    params = {"query": city_name, "lang": "en_US"}
-    response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-    if data.get('data'):
-        for item in data['data']:
-            if item.get('result_type') == 'geography':
-                if geo_id := item.get('result_object', {}).get('location_id'):
-                    return geo_id
-    return None
-
 def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
+    """Searches TripAdvisor using the confirmed working legacy endpoint."""
     if not geo_id: return None
-    url = f"https://{TRIPADVISOR_API_HOST}/hotels/search"
+    url = f"https://{TRIPADVISOR_API_HOST}/api/v1/hotels/searchHotels"
     params = {"geoId": geo_id, "checkIn": checkin, "checkOut": checkout, "adults": adults, "rooms": "1", "currencyCode": "EUR"}
     response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=15)
     response.raise_for_status()
@@ -144,55 +126,57 @@ def process_booking_hotels(api_data, search_params, city_info):
     return processed
 
 def process_tripadvisor_hotels(api_data):
+    """Processes the complex TripAdvisor response structure."""
     processed = []
-    hotels_data = api_data.get('data', []) if api_data else []
+    # The actual list of hotels is nested under data -> data
+    hotels_data = api_data.get('data', {}).get('data', []) if api_data else []
     if not isinstance(hotels_data, list): return []
+
     for hotel in hotels_data[:TRIPADVISOR_HOTEL_LIMIT]:
         price = 'N/A'
         if price_str := hotel.get('priceForDisplay'):
-            if numbers := URL_REGEX.findall(price_str.replace(',', '')):
+            # Price can be a simple string like "$123"
+            numbers = URL_REGEX.findall(str(price_str).replace(',', ''))
+            if numbers:
                 price = int(numbers[0])
+        
+        booking_url = hotel.get('commerceInfo', {}).get('externalUrl', '#')
+
         processed.append({
             'id': hotel.get('id'), 'name': hotel.get('title', 'Unknown Hotel'),
             'address': hotel.get('secondaryInfo', 'N/A'),
-            'coordinates': [float(hotel.get('geoSummary', {}).get('latitude', 0)), float(hotel.get('geoSummary', {}).get('longitude', 0))],
+            'coordinates': [0.0, 0.0], # Coordinates are not in this response, would need another call
             'price': price, 'rating': float(hotel.get('bubbleRating', {}).get('rating', 4.0)),
             'source': 'tripadvisor',
-            'booking_url': f"https://www.tripadvisor.com{hotel.get('commerceUrl')}" if hotel.get('commerceUrl') else f"https://www.tripadvisor.com/Search?q={quote_plus(hotel.get('title', 'Hotel'))}"
+            'booking_url': booking_url
         })
     return processed
 
 # --- Helper Functions for Parallel Execution ---
 
 def fetch_booking_hotels_helper(city_info, params):
-    """Wrapper function for Booking.com search for use in ThreadPoolExecutor."""
     try:
         location_id = get_booking_location_id(city_info['search_query'], city_info['country'])
-        if not location_id:
-            logging.error(f"Booking.com helper could not find location ID for {city_info['name']}")
-            return []
+        if not location_id: return []
         api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
         return process_booking_hotels(api_data, params, city_info)
     except Exception as e:
         logging.error(f"Exception in fetch_booking_hotels_helper: {e}")
-        return [] # Return empty list on failure
+        return []
 
 def fetch_tripadvisor_hotels_helper(city_info, params):
-    """Wrapper function for TripAdvisor search for use in ThreadPoolExecutor."""
     try:
-        geo_id = get_tripadvisor_geo_id(city_info['name'])
-        if not geo_id:
-            logging.error(f"TripAdvisor helper could not find Geo ID for {city_info['name']}")
-            return []
+        geo_id = city_info.get('tripadvisor_id')
+        if not geo_id: return []
         api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
         return process_tripadvisor_hotels(api_data)
     except Exception as e:
         logging.error(f"Exception in fetch_tripadvisor_hotels_helper: {e}")
-        return [] # Return empty list on failure
+        return []
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v11.6</h1><p>Completed and corrected version.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v11.7</h1><p>Final corrected logic.</p>')
 
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
@@ -264,11 +248,11 @@ def get_dual_hotels():
     })
 
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.6 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.7 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v11.6...")
+    logging.info("🚀 Starting STAYFINDR Backend v11.7...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
