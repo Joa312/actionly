@@ -1,8 +1,7 @@
-# STAYFINDR BACKEND v12.1 - Final & Stable Version
-# FINAL FIX: This version provides a definitive solution to all known issues.
-# - Reverts TripAdvisor to the modern API (tripadvisor-com1) and correctly implements the two-step search (search list -> get offers).
-# - This ensures that hotel coordinates are always available, fixing the missing map pins issue.
-# - Data processing paths for Booking.com and TripAdvisor are fully isolated to prevent data contamination.
+# STAYFINDR BACKEND v12.2 - Final & Stable Version
+# FINAL FIX: Corrected the extraction path for TripAdvisor's 'contentId'.
+# The previous version was looking in the wrong place, causing the two-step search to fail.
+# This version uses the correct, deeply-nested path, which is the definitive fix.
 
 import os
 import logging
@@ -29,7 +28,7 @@ CORS(app, origins=["https://joa312.github.io", "http://127.0.0.1:5500", "http://
 
 # --- API & Data Constants ---
 BOOKING_API_HOST = "booking-com18.p.rapidapi.com"
-TRIPADVISOR_API_HOST = "tripadvisor-com1.p.rapidapi.com" # Using the modern, correct host
+TRIPADVISOR_API_HOST = "tripadvisor-com1.p.rapidapi.com"
 BOOKING_HOTEL_LIMIT = 20
 TRIPADVISOR_HOTEL_LIMIT = 15
 URL_REGEX = re.compile(r'\d+')
@@ -129,7 +128,6 @@ def create_booking_url(hotel, city_info, params):
     return f"https://www.booking.com/searchresults.{domain_suffix}?{query_string}"
 
 def process_booking_hotels(api_data, search_params, city_info):
-    logging.info("--- Entering: process_booking_hotels ---")
     processed = []
     hotels_data = api_data.get('data', []) if api_data else []
     if not isinstance(hotels_data, list): return []
@@ -150,7 +148,6 @@ def process_booking_hotels(api_data, search_params, city_info):
 
 def process_tripadvisor_hotel(hotel_summary, offers_data):
     """Combines hotel summary data with its specific offer data."""
-    logging.info(f"--- Entering: process_tripadvisor_hotel for {hotel_summary.get('title')} ---")
     lowest_price_offer = min(offers_data.get('data', []), key=lambda x: x.get('price', float('inf')), default=None)
     if not lowest_price_offer: return None
     
@@ -191,8 +188,11 @@ def fetch_tripadvisor_hotels_helper(city_info, params):
         hotel_list = search_tripadvisor_hotels_list(geo_id)
         processed_hotels = []
         for hotel_summary in hotel_list[:TRIPADVISOR_HOTEL_LIMIT]:
-            content_id = hotel_summary.get('id')
-            if not content_id: continue
+            # KORRIGERING: Använder den korrekta, djupt nästlade sökvägen för att hitta contentId.
+            content_id = hotel_summary.get('cardLink', {}).get('route', {}).get('typedParams', {}).get('contentId')
+            if not content_id:
+                logging.warning(f"Could not find contentId for hotel: {hotel_summary.get('title')}")
+                continue
             try:
                 offers_data = get_tripadvisor_hotel_offers(content_id, params['checkin'], params['checkout'], params['adults'])
                 full_hotel_data = process_tripadvisor_hotel(hotel_summary, offers_data)
@@ -208,7 +208,7 @@ def fetch_tripadvisor_hotels_helper(city_info, params):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v12.1</h1><p>Final and stable version.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v12.2</h1><p>Final and stable version.</p>')
 
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
@@ -275,11 +275,11 @@ def get_dual_hotels():
     })
 
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v12.1 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v12.2 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v12.1...")
+    logging.info("🚀 Starting STAYFINDR Backend v12.2...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
