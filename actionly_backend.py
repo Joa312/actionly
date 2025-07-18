@@ -1,7 +1,8 @@
-# STAYFINDR BACKEND v11.1 - Corrected & Final Version
-# FIX: This version merges the stable logic from v9.1 into the user's v11.0 codebase.
-# It uses the correct, modern API endpoints and fully dynamic ID lookups for both services.
-# All legacy code, outdated hosts (tripadvisor16), and complex, non-working functions have been removed.
+# STAYFINDR BACKEND v11.3 - Intelligent Location Matching Fix
+# FINAL FIX: This version provides a definitive solution to location mismatches and data contamination.
+# - The Booking.com location lookup now strictly matches the country code from the CSV file.
+# - If no exact country match is found, it will return an error instead of guessing the wrong location.
+# - Data processing paths for Booking.com and TripAdvisor remain fully isolated.
 
 import os
 import logging
@@ -48,12 +49,13 @@ def load_cities_from_csv(filename='cities.csv'):
                     'name': row.get('name', 'N/A').replace('"', '').strip(),
                     'search_query': row.get('search_query', ''),
                     'country': row.get('country', 'com').lower(),
+                    'tripadvisor_id': row.get('tripadvisor_id', '')
                 }
         logging.info(f"Successfully loaded {len(cities)} cities from {filename}.")
         return cities
     except FileNotFoundError:
         logging.error(f"CRITICAL: The file {filename} was not found.")
-        return {} # Return empty dict as a fallback
+        return {}
     except Exception as e:
         logging.error(f"CRITICAL: Failed to read or parse {filename}. Error: {e}", exc_info=True)
         return {}
@@ -63,7 +65,9 @@ CITIES = load_cities_from_csv()
 # --- External API Functions ---
 
 def get_booking_location_id(city_query, country_code):
-    """Intelligently fetches location ID by matching the country code."""
+    """
+    Intelligently fetches location ID by strictly matching the country code to avoid ambiguity.
+    """
     if not city_query: return None
     url = f"https://{BOOKING_API_HOST}/stays/auto-complete"
     params = {"query": city_query}
@@ -72,13 +76,15 @@ def get_booking_location_id(city_query, country_code):
     data = response.json()
 
     if data and isinstance(data.get('data'), list):
+        # Iterate through results to find the one in the correct country
         for result in data['data']:
             if result.get('countryCode', '').lower() == country_code:
                 logging.info(f"Found matching location for {city_query} in {country_code}: ID {result.get('id')}")
                 return result.get('id')
-        if data['data']:
-            logging.warning(f"No exact country match for {city_query}. Falling back to first result.")
-            return data['data'][0].get('id')
+        
+        # If no exact match was found after checking all results, fail explicitly.
+        logging.error(f"No location with country code '{country_code}' found for query '{city_query}'. API returned: {data}")
+        return None
             
     logging.error(f"Could not find any Booking.com location for query: {city_query}")
     return None
@@ -91,6 +97,7 @@ def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
     return response.json()
 
 def get_tripadvisor_geo_id(city_name):
+    """Dynamically fetches Geo ID as a fallback."""
     url = f"https://{TRIPADVISOR_API_HOST}/locations/search"
     params = {"query": city_name, "lang": "en_US"}
     response = requests.get(url, headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": TRIPADVISOR_API_HOST}, params=params, timeout=10)
@@ -100,9 +107,7 @@ def get_tripadvisor_geo_id(city_name):
         for item in data['data']:
             if item.get('result_type') == 'geography':
                 if geo_id := item.get('result_object', {}).get('location_id'):
-                    logging.info(f"Found TripAdvisor geoId: {geo_id} for city: {city_name}")
                     return geo_id
-    logging.warning(f"Could not find TripAdvisor geoId for city: {city_name}")
     return None
 
 def search_tripadvisor_hotels(geo_id, checkin, checkout, adults):
@@ -119,19 +124,12 @@ def create_booking_url(hotel, city_info, params):
     country_code_map = {'gb': 'en-gb', 'se': 'sv', 'fr': 'fr', 'es': 'es', 'it': 'it', 'de': 'de', 'nl': 'nl'}
     country = city_info.get('country', 'com')
     domain_suffix = country_code_map.get(country, 'com') + '.html'
-    
-    base_params = {
-        'ss': hotel.get('name', 'Hotel'),
-        'checkin': params['checkin'],
-        'checkout': params['checkout'],
-        'group_adults': params['adults'],
-        'no_rooms': params['rooms'],
-        'group_children': '0'
-    }
+    base_params = {'ss': hotel.get('name', 'Hotel'), 'checkin': params['checkin'], 'checkout': params['checkout'], 'group_adults': params['adults'], 'no_rooms': params['rooms'], 'group_children': '0'}
     query_string = urlencode(base_params)
     return f"https://www.booking.com/searchresults.{domain_suffix}?{query_string}"
 
 def process_booking_hotels(api_data, search_params, city_info):
+    logging.info("--- Now processing data with process_booking_hotels ---")
     processed = []
     hotels_data = api_data.get('data', []) if api_data else []
     if not isinstance(hotels_data, list): return []
@@ -151,6 +149,7 @@ def process_booking_hotels(api_data, search_params, city_info):
     return processed
 
 def process_tripadvisor_hotels(api_data):
+    logging.info("--- Now processing data with process_tripadvisor_hotels ---")
     processed = []
     hotels_data = api_data.get('data', []) if api_data else []
     if not isinstance(hotels_data, list): return []
@@ -185,12 +184,12 @@ def handle_hotel_search(source):
 
         if source == 'booking':
             location_id = get_booking_location_id(city_info['search_query'], city_info['country'])
-            if not location_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på Booking.com."}), 404
+            if not location_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' i rätt land på Booking.com."}), 404
             api_data = search_booking_hotels(location_id, params['checkin'], params['checkout'], params['adults'], params['rooms'])
             processed_hotels = process_booking_hotels(api_data, params, city_info)
 
         elif source == 'tripadvisor':
-            geo_id = get_tripadvisor_geo_id(city_name)
+            geo_id = city_info.get('tripadvisor_id') or get_tripadvisor_geo_id(city_name)
             if not geo_id: return jsonify({'error': f"Kunde inte hitta ett giltigt ID för '{city_name}' på TripAdvisor."}), 404
             api_data = search_tripadvisor_hotels(geo_id, params['checkin'], params['checkout'], params['adults'])
             processed_hotels = process_tripadvisor_hotels(api_data)
@@ -209,7 +208,7 @@ def handle_hotel_search(source):
 
 # --- Flask Routes ---
 @app.route('/')
-def home(): return render_template_string('<h1>STAYFINDR Backend v11.1</h1><p>Corrected and stable version.</p>')
+def home(): return render_template_string('<h1>STAYFINDR Backend v11.3</h1><p>Intelligent location matching fixed.</p>')
 @app.route('/api/cities')
 def get_cities_route(): return jsonify({'cities': CITIES})
 
@@ -225,11 +224,11 @@ def get_booking_hotels_route(): return handle_hotel_search(source='booking')
 def get_tripadvisor_hotels_route(): return handle_hotel_search(source='tripadvisor')
 
 @app.route('/test')
-def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.1 Active'})
+def test_endpoint_route(): return jsonify({'status': 'STAYFINDR Backend v11.3 Active'})
 
 # --- Application Startup ---
 if __name__ == '__main__':
-    logging.info("🚀 Starting STAYFINDR Backend v11.1...")
+    logging.info("🚀 Starting STAYFINDR Backend v11.3...")
     is_production = os.environ.get('FLASK_ENV') == 'production'
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=not is_production, host='0.0.0.0', port=port)
