@@ -168,8 +168,11 @@ def search_booking_hotels(location_id, checkin, checkout, adults, rooms):
 
 # === TRIPADVISOR API FUNCTIONS ===
 
+# TRIPADVISOR FIX - Uppdaterade funktioner för Backend v11.1
+# Ersätt dessa funktioner i din backend för att fixa Stockholm-problemet
+
 def get_tripadvisor_location_id(city_info):
-    """Get TripAdvisor location ID for a city"""
+    """Get TripAdvisor location ID for a city - FIXED VERSION"""
     
     # Check cache first
     city_name = city_info['name']
@@ -178,35 +181,87 @@ def get_tripadvisor_location_id(city_info):
             logger.info(f"📦 Using cached TripAdvisor location ID for {city_name}")
             return TRIPADVISOR_LOCATION_CACHE[city_name]
     
+    # Special handling for problematic cities
+    special_location_ids = {
+        'stockholm': '189852',  # Stockholm, Sweden
+        'gothenburg': '189894',  # Gothenburg, Sweden
+        'malmo': '189838',    # Malmö, Sweden
+        'copenhagen': '189541', # Copenhagen, Denmark
+        'oslo': '190479',      # Oslo, Norway
+        'helsinki': '189934',  # Helsinki, Finland
+        'paris': '187147',     # Paris, France
+        'london': '186338',    # London, UK
+        'barcelona': '187497', # Barcelona, Spain
+        'madrid': '187514',    # Madrid, Spain
+        'rome': '187791',      # Rome, Italy
+        'berlin': '187323',    # Berlin, Germany
+        'amsterdam': '188590', # Amsterdam, Netherlands
+        'vienna': '190454',    # Vienna, Austria
+        'prague': '274707',    # Prague, Czech Republic
+    }
+    
+    # Check if we have a hardcoded location ID
+    city_key = city_info['name'].split(',')[0].lower().replace(' ', '')
+    if city_key in special_location_ids:
+        location_id = special_location_ids[city_key]
+        logger.info(f"✅ Using hardcoded TripAdvisor location_id: {location_id} for {city_name}")
+        
+        # Cache the result
+        with cache_lock:
+            TRIPADVISOR_LOCATION_CACHE[city_name] = location_id
+        
+        return location_id
+    
+    # Try API search with different query formats
+    search_queries = [
+        city_info['search_query'].split(',')[0],  # Just city name
+        city_info['name'].split(',')[0],          # City from name field
+        city_info.get('search_query', city_info['name'])  # Full search query
+    ]
+    
     url = "https://tripadvisor16.p.rapidapi.com/api/v1/hotels/searchLocation"
-    
-    querystring = {"query": city_info['search_query'].split(',')[0]}  # Just city name
-    
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
         "x-rapidapi-host": TRIPADVISOR_HOST
     }
     
-    try:
-        response = requests.get(url, headers=headers, params=querystring)
-        if response.status_code == 200:
-            data = response.json()
-            if 'data' in data and data['data']:
-                location_id = data['data'][0].get('geoId')
-                logger.info(f"✅ TripAdvisor location_id: {location_id} for {city_name}")
+    for query in search_queries:
+        logger.info(f"🔍 Trying TripAdvisor location search with: {query}")
+        
+        querystring = {"query": query}
+        
+        try:
+            response = requests.get(url, headers=headers, params=querystring, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and data['data']:
+                    # Get the first result
+                    location = data['data'][0]
+                    location_id = location.get('geoId') or location.get('locationId')
+                    
+                    if location_id:
+                        logger.info(f"✅ Found TripAdvisor location_id: {location_id} for {city_name}")
+                        
+                        # Cache the result
+                        with cache_lock:
+                            TRIPADVISOR_LOCATION_CACHE[city_name] = location_id
+                        
+                        return location_id
+            else:
+                logger.warning(f"TripAdvisor API returned {response.status_code} for query: {query}")
                 
-                # Cache the result
-                with cache_lock:
-                    TRIPADVISOR_LOCATION_CACHE[city_name] = location_id
-                
-                return location_id
-    except Exception as e:
-        logger.error(f"❌ TripAdvisor location ID error: {e}")
+        except Exception as e:
+            logger.error(f"TripAdvisor location search error for {query}: {e}")
+            continue
     
+    logger.error(f"❌ Could not find TripAdvisor location for {city_name}")
     return None
 
+
 def search_tripadvisor_hotels(location_id, checkin, checkout, adults, rooms):
-    """Search hotels using TripAdvisor API"""
+    """Search hotels using TripAdvisor API - IMPROVED VERSION"""
+    
+    # First try the standard endpoint
     url = "https://tripadvisor16.p.rapidapi.com/api/v1/hotels/searchHotels"
     
     querystring = {
@@ -214,7 +269,9 @@ def search_tripadvisor_hotels(location_id, checkin, checkout, adults, rooms):
         "checkIn": checkin,
         "checkOut": checkout,
         "pageNumber": "1",
-        "currencyCode": "EUR"
+        "currencyCode": "EUR",
+        "adults": adults,
+        "rooms": rooms
     }
     
     headers = {
@@ -223,14 +280,61 @@ def search_tripadvisor_hotels(location_id, checkin, checkout, adults, rooms):
     }
     
     try:
+        logger.info(f"🔍 Searching TripAdvisor hotels for location {location_id}")
         response = requests.get(url, headers=headers, params=querystring, timeout=10)
+        
         if response.status_code == 200:
             data = response.json()
-            return data
+            
+            # Check if we got hotels
+            if data and 'data' in data:
+                hotels_data = data.get('data', {})
+                if isinstance(hotels_data, dict) and 'data' in hotels_data:
+                    hotels = hotels_data['data']
+                    logger.info(f"✅ Found {len(hotels)} hotels from TripAdvisor")
+                    return data
+                elif isinstance(hotels_data, list):
+                    logger.info(f"✅ Found {len(hotels_data)} hotels from TripAdvisor")
+                    return {'data': {'data': hotels_data}}
+            
+            # Try alternative response structure
+            if 'result' in data and 'data' in data['result']:
+                logger.info("Using alternative TripAdvisor response structure")
+                return {'data': data['result']}
+                
+        elif response.status_code == 404:
+            logger.error(f"TripAdvisor: No hotels found for location {location_id}")
         else:
-            logger.error(f"❌ TripAdvisor API returned {response.status_code}")
+            logger.error(f"TripAdvisor API returned {response.status_code}: {response.text[:200]}")
+            
+    except requests.exceptions.Timeout:
+        logger.error("TripAdvisor API timeout")
     except Exception as e:
-        logger.error(f"❌ TripAdvisor hotels search error: {e}")
+        logger.error(f"TripAdvisor hotels search error: {e}")
+    
+    return None
+
+# Additional helper function to validate TripAdvisor responses
+def validate_tripadvisor_response(data):
+    """Validate and normalize TripAdvisor API response"""
+    if not data:
+        return None
+    
+    # Try different response structures
+    hotels = None
+    
+    # Structure 1: data.data.data
+    if 'data' in data and isinstance(data['data'], dict) and 'data' in data['data']:
+        hotels = data['data']['data']
+    # Structure 2: data.data (list)
+    elif 'data' in data and isinstance(data['data'], list):
+        hotels = data['data']
+    # Structure 3: result.data
+    elif 'result' in data and 'data' in data['result']:
+        hotels = data['result']['data']
+    
+    if hotels and isinstance(hotels, list) and len(hotels) > 0:
+        return hotels
     
     return None
 
